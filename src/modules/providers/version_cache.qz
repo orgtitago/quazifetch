@@ -1,0 +1,68 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// An updated executable changes the cache key for its version string.
+import std.core;
+import std.fs;
+import text;
+import nix_cache;
+import std.unix;
+
+fn location(program: str, create: bool) String {
+    var filename = text.join("/version-", program);
+    filename = filename.push_str(".txt");
+    nix_cache.cache_file(filename.as_str(), create)
+}
+
+fn signature(program: str, executable_path: str) String {
+    const fingerprint = nix_cache.fingerprint(executable_path);
+    if (fingerprint.is_empty()) { ret String.new(); }
+    var output = text.join("QZVER1\n", program);
+    output = output.push_str("\n");
+    output = output.push_str(executable_path);
+    output = output.push_str("\n");
+    output = output.push_str(fingerprint.as_str());
+    output.push_str("\n")
+}
+
+pub fn load(program: str, executable_path: str) String {
+    @cfg(target_os = "linux") {
+        const path = location(program, false);
+        if (path.is_empty()) { ret String.new(); }
+        const prefix = signature(program, executable_path);
+        if (prefix.is_empty()) { ret String.new(); }
+        const content = fs.read_to_string_with_limit(path.as_str(), 2048);
+        if (content.is_err()) { ret String.new(); }
+        const data = content.unwrap();
+        if (!data.starts_with(prefix.as_str())) { ret String.new(); }
+        const suffix = text.byte_slice(data.as_str(), prefix.bytes_len(), data.bytes_len());
+        ret suffix.trim();
+    }
+    String.new()
+}
+
+pub fn save(program: str, executable_path: str, value: str) void {
+    @cfg(target_os = "linux") {
+        if (value.is_empty() || value.bytes_len() > 128 || value.contains("\n")) { ret; }
+        const prefix = signature(program, executable_path);
+        if (prefix.is_empty()) { ret; }
+        const path = location(program, true);
+        if (path.is_empty()) { ret; }
+        var temporary = text.join(path.as_str(), ".");
+        var pid: i32 = 0;
+        unsafe { pid = unix.getpid(); }
+        temporary = temporary.push_str(pid.to_string().as_str());
+        const opened = fs.File.create(temporary.as_str());
+        if (opened.is_err()) { ret; }
+        var file = opened.unwrap();
+        const text_content = prefix.push_str(value);
+        const written = file.write_str(text_content.as_str());
+        const closed = file.close();
+        if (written.is_err() || closed.is_err()) {
+            const discarded = fs.remove(temporary.as_str());
+            ret;
+        }
+        const renamed = fs.rename(temporary.as_str(), path.as_str());
+        if (renamed.is_err()) { const discarded = fs.remove(temporary.as_str()); }
+    }
+}

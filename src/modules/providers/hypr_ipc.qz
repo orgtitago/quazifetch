@@ -1,0 +1,133 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Query Hyprland directly over its command socket.
+import std.core;
+import std.unix;
+import std.os;
+import text;
+
+fn valid_signature(value: str) bool {
+    if (value.is_empty() || value.bytes_len() > 80) { ret false; }
+    var i: usize = 0;
+    for (i < value.bytes_len()) {
+        const c = core.str_byte_at(value, i);
+        if (!((c >= 48 && c <= 57) || (c >= 65 && c <= 90) ||
+              (c >= 97 && c <= 122) || c == 45 || c == 95 || c == 46)) {
+            ret false;
+        }
+        i++;
+    }
+    true
+}
+
+fn socket_path() String {
+    const signature = os.env("HYPRLAND_INSTANCE_SIGNATURE", "");
+    if (!valid_signature(signature.as_str())) { ret String.new(); }
+    var root = os.env("XDG_RUNTIME_DIR", "");
+    if (root.is_empty()) { ret String.new(); }
+    var path = text.join(root.as_str(), "/hypr/");
+    path = path.push_str(signature.as_str());
+    path.push_str("/.socket.sock")
+}
+
+// Keep the socket nonblocking and bound the exchange by a deadline.
+pub fn request(message: str) String {
+    @cfg(target_os = "linux") {
+        const path = socket_path();
+        if (path.is_empty() || path.bytes_len() > 107) { ret String.new(); }
+        var fd: i32 = -1;
+        unsafe { fd = unix.socket(1, 1 | 2048 | 524288, 0); } // SOCK_STREAM | NONBLOCK | CLOEXEC
+        if (fd < 0) { ret String.new(); }
+        var addr: *u8 = 0;
+        unsafe { addr = core.malloc(110); }
+        if (addr == 0) { unsafe { unix.close(fd); } ret String.new(); }
+        unsafe {
+            *addr = 1;
+            *(addr + 1) = 0;
+        }
+        var i: usize = 0;
+        for (i < path.bytes_len()) {
+            unsafe { *(addr + 2 + i) = core.str_byte_at(path.as_str(), i); }
+            i++;
+        }
+        unsafe { *(addr + 2 + path.bytes_len()) = 0; }
+        var connected: i32 = -1;
+        unsafe { connected = unix.connect(fd, addr, (3 + path.bytes_len()) as u32); }
+        unsafe { core.free(addr); }
+        if (connected != 0 && connected != -115) { unsafe { unix.close(fd); } ret String.new(); }
+        var pollfd: *u8 = 0;
+        unsafe { pollfd = core.malloc(8); }
+        if (pollfd == 0) { unsafe { unix.close(fd); } ret String.new(); }
+        unsafe { *(pollfd as *i32) = fd; }
+        if (connected != 0) {
+            unsafe { *((pollfd + 4) as *i16) = 4; *((pollfd + 6) as *i16) = 0; }
+            var ready: i32 = -1;
+            unsafe { ready = unix.poll(pollfd, 1, 100); }
+            if (ready <= 0) { unsafe { core.free(pollfd); } unsafe { unix.close(fd); } ret String.new(); }
+            var soerror: *u8 = 0;
+            var length: *u32 = 0;
+            unsafe {
+                soerror = core.malloc(4);
+                length = core.malloc(4) as *u32;
+            }
+            if (soerror == 0 || length == 0) {
+                if (soerror != 0) { unsafe { core.free(soerror); } }
+                if (length != 0) { unsafe { core.free(length as *u8); } }
+                unsafe { core.free(pollfd); }
+                unsafe { unix.close(fd); } ret String.new();
+            }
+            unsafe { *length = 4; }
+            var rc: i32 = -1;
+            unsafe { rc = unix.getsockopt(fd, 1, 4, soerror, length); }
+            var err: i32 = -1;
+            unsafe {
+                err = *(soerror as *i32);
+                core.free(soerror);
+                core.free(length as *u8);
+            }
+            if (rc < 0 || err != 0) { unsafe { core.free(pollfd); } unsafe { unix.close(fd); } ret String.new(); }
+        }
+        var sent: usize = 0;
+        for (sent < message.bytes_len()) {
+            unsafe { *((pollfd + 4) as *i16) = 4; *((pollfd + 6) as *i16) = 0; }
+            var ready: i32 = -1;
+            unsafe { ready = unix.poll(pollfd, 1, 100); }
+            if (ready <= 0) { unsafe { core.free(pollfd); } unsafe { unix.close(fd); } ret String.new(); }
+            var n: isize = -1;
+            unsafe { n = unix.write(fd, core.str_as_ptr(message) + sent, message.bytes_len() - sent); }
+            if (n <= 0) { unsafe { core.free(pollfd); } unsafe { unix.close(fd); } ret String.new(); }
+            sent += n as usize;
+        }
+        const capacity: usize = 524288;
+        var buffer: *u8 = 0;
+        unsafe { buffer = core.malloc(capacity + 1); }
+        if (buffer == 0) { unsafe { core.free(pollfd); } unsafe { unix.close(fd); } ret String.new(); }
+        var used: usize = 0;
+        var eof: bool = false;
+        for (used < capacity) {
+            unsafe { *((pollfd + 4) as *i16) = 1; *((pollfd + 6) as *i16) = 0; }
+            var ready: i32 = -1;
+            unsafe { ready = unix.poll(pollfd, 1, 100); }
+            if (ready <= 0) { break; }
+            var n: isize = -1;
+            unsafe { n = unix.read(fd, buffer + used, capacity - used); }
+            if (n < 0) {
+                if (n == -4 || n == -11) { continue; }
+                break;
+            }
+            if (n == 0) { eof = true; break; }
+            used += n as usize;
+        }
+        unsafe { core.free(pollfd); }
+        unsafe { unix.close(fd); }
+        var result = String.new();
+        // Discard truncated replies instead of parsing partial JSON.
+        if (used > 0 && eof) {
+            unsafe { *(buffer + used) = 0; result = String.from(core.str_from_ptr(buffer)); }
+        }
+        unsafe { core.free(buffer); }
+        ret result;
+    }
+    String.new()
+}

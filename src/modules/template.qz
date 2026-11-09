@@ -1,0 +1,117 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.core;
+import quazifetch.config;
+import registry;
+import labels;
+import providers.text as txt;
+
+pub struct Rendered {
+    text: String,
+    available: bool,
+}
+
+fn header() String {
+    const username = registry.lookup("username");
+    const hostname = registry.lookup("hostname");
+    if (username.is_empty()) { ret hostname; }
+    if (hostname.is_empty()) { ret username; }
+    var result = String.from(username.as_str());
+    result = result.push_str("@");
+    result.push_str(hostname.as_str())
+}
+
+fn accent(value: str, use_color: bool) String {
+    if (!use_color) { ret String.from(value); }
+    var result = String.from(config.label_color());
+    result = result.push_str(value);
+    result.push_str("\e[0m")
+}
+
+fn percentage_color(value: u64) str {
+    if (value <= config.percent_low_max()) { ret config.percent_low_color(); }
+    if (value <= config.percent_medium_max()) { ret config.percent_medium_color(); }
+    config.percent_high_color()
+}
+
+// Color only the percentage, not the surrounding value.
+fn highlight_percentages(value: str, use_color: bool) String {
+    if (!use_color || !value.contains("%")) { ret String.from(value); }
+    const length: usize = core.strlen(value);
+    var output = String.new();
+    var segment: usize = 0;
+    var i: usize = 0;
+    for (i < length) {
+        if (core.str_byte_at(value, i) == 37) {
+            var from: usize = i;
+            for (from > segment) {
+                const c = core.str_byte_at(value, from - 1);
+                if (c < 48 || c > 57) { break; }
+                from--;
+            }
+            if (from < i) {
+                const prefix = txt.byte_slice(value, segment, from);
+                output = output.push_str(prefix.as_str());
+                var percent: u64 = 0;
+                var j: usize = from;
+                for (j < i) {
+                    percent = percent * 10 + (core.str_byte_at(value, j) - 48) as u64;
+                    j++;
+                }
+                output = output.push_str(percentage_color(percent));
+                const number = txt.byte_slice(value, from, i + 1);
+                output = output.push_str(number.as_str());
+                output = output.push_str(config.value_color());
+                segment = i + 1;
+            }
+        }
+        i++;
+    }
+    const tail = txt.byte_slice(value, segment, length);
+    output.push_str(tail.as_str())
+}
+
+pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
+    if (key == "blank") { ret Rendered { text: String.new(), available: true }; }
+    if (key == "header") {
+        const name = header();
+        if (name.is_empty()) { ret Rendered { text: String.new(), available: false }; }
+        ret Rendered { text: accent(name.as_str(), use_color), available: true };
+    }
+    if (key == "separator") {
+        const name = header();
+        if (name.is_empty()) { ret Rendered { text: String.new(), available: false }; }
+        var underline = String.new();
+        var i: usize = 0;
+        for (i < name.bytes_len()) { underline = underline.push_str("-"); i++; }
+        ret Rendered { text: accent(underline.as_str(), use_color), available: true };
+    }
+    var value = registry.lookup(key);
+    if (key == "os" && !value.is_empty()) {
+        const arch = registry.lookup("arch");
+        if (!arch.is_empty()) {
+            value = value.push_str(" ");
+            value = value.push_str(arch.as_str());
+        }
+    }
+    if (value.is_empty() && !show_missing) {
+        ret Rendered { text: String.new(), available: false };
+    }
+    if (value.is_empty()) { value = String.from("n/a"); }
+    const label = labels.for_key(key);
+    if (label.is_empty()) { ret Rendered { text: String.new(), available: false }; }
+    var output = String.new();
+    if (use_color) { output = output.push_str(config.label_color()); }
+    output = output.push_str(label.as_str());
+    output = output.push_str(": ");
+    if (use_color) { output = output.push_str(config.value_color()); }
+    const value_text = highlight_percentages(value.as_str(), use_color);
+    output = output.push_str(value_text.as_str());
+    if (use_color) { output = output.push_str("\e[0m"); }
+    Rendered { text: output, available: true }
+}
+
+pub fn names() Array[str] { registry.names() }
+
+pub fn layout() Array[str] { config.layout() }

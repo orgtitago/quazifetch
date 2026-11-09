@@ -1,0 +1,88 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import std.core;
+import text;
+import android;
+
+fn distribution() String {
+    const mobile = android.os_name();
+    if (!mobile.is_empty()) { ret mobile; }
+    @cfg(target_os = "linux") {
+        const pretty: String = text.file_field("/etc/os-release", "PRETTY_NAME=");
+        if (!pretty.is_empty()) { ret pretty; }
+        const other: String = text.file_field("/usr/lib/os-release", "PRETTY_NAME=");
+        if (!other.is_empty()) { ret other; }
+    }
+    os.version()
+}
+
+fn kernel() String {
+    @cfg(target_os = "linux") {
+        const release = text.file("/proc/sys/kernel/osrelease");
+        if (release.is_empty()) { ret String.new(); }
+        ret text.join("Linux ", release.as_str());
+    }
+    @cfg(target_os = "netbsd") { ret text.file("/kern/version"); }
+    @cfg(target_os = "windows") {
+        const build: u32 = core.windows_build();
+        if (build == 0) { ret String.new(); }
+        const n: String = build.to_string();
+        const prefix: String = String.from("Windows NT build ");
+        ret prefix.push_str(n.as_str());
+    }
+    String.new()
+}
+
+fn init_name() String {
+    @cfg(target_os = "linux") { ret text.file("/proc/1/comm"); }
+    @cfg(target_os = "netbsd") { ret text.file("/proc/1/comm"); }
+    String.new()
+}
+
+fn uptime() String {
+    @cfg(target_os = "linux") {
+        const raw: String = text.file("/proc/uptime");
+        const separator = raw.find(".");
+        if (separator.is_none()) { ret String.new(); }
+        const seconds_text = text.byte_slice(raw.as_str(), 0, separator.unwrap());
+        const parsed = seconds_text.parse[u64]();
+        if (parsed.is_err()) { ret String.new(); }
+        const seconds: u64 = parsed.unwrap();
+        const days: u64 = seconds / 86400;
+        const hours: u64 = (seconds % 86400) / 3600;
+        const minutes: u64 = (seconds % 3600) / 60;
+        var result: String = String.new();
+        if (days > 0) {
+            const day: String = days.to_string();
+            result = result.push_str(day.as_str());
+            if (days == 1) { result = result.push_str(" day, "); }
+            else { result = result.push_str(" days, "); }
+        }
+        const hm = text.hours_minutes(hours, minutes, days > 0);
+        ret result.push_str(hm.as_str());
+    }
+    String.new()
+}
+
+pub fn lookup(key: str) String {
+    if (key == "os") { ret distribution(); }
+    if (key == "distro") {
+        @cfg(target_os = "linux") { ret text.file_field("/etc/os-release", "ID="); }
+    }
+    if (key == "timezone") {
+        const configured: String = os.env("TZ", "");
+        if (!configured.is_empty()) { ret configured; }
+        @cfg(target_os = "linux") { ret text.file("/etc/timezone"); }
+    }
+    if (key == "kernel") { ret kernel(); }
+    if (key == "arch") {
+        @cfg(target_arch = "x86_64") { ret String.from("x86_64"); }
+        ret String.new();
+    }
+    if (key == "init") { ret init_name(); }
+    if (key == "uptime") { ret uptime(); }
+    if (key == "os_name") { ret String.from(os.name()); }
+    String.new()
+}

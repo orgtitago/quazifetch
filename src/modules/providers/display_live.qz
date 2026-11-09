@@ -1,0 +1,130 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// The compositor supplies the active mode and scale; EDID supplies panel details.
+import std.core;
+import std.json;
+import std.os;
+import text;
+import commands;
+import hypr_ipc;
+
+pub struct Active {
+    width: u64,
+    height: u64,
+    hz: u64,
+    scale: String,
+}
+
+pub fn missing() Active { Active { width: 0, height: 0, hz: 0, scale: String.new() } }
+
+fn at(src: str, pos: usize) u8 { core.str_byte_at(src, pos) }
+fn whitespace(c: u8) bool { c == 32 || c == 9 || c == 10 || c == 13 }
+
+// Read only fields from the selected monitor object.
+fn raw_field(object: str, key: str) String {
+    const quoted: String = text.join(text.join("\"", key).as_str(), "\"");
+    const found = object.find(quoted.as_str());
+    if (found.is_none()) { ret String.new(); }
+    var i: usize = found.unwrap() + quoted.bytes_len();
+    const length: usize = object.bytes_len();
+    for (i < length && whitespace(at(object, i))) { i++; }
+    if (i == length || at(object, i) != 58) { ret String.new(); }
+    i++;
+    for (i < length && whitespace(at(object, i))) { i++; }
+    if (i == length) { ret String.new(); }
+    var start: usize = i;
+    if (at(object, i) == 34) {
+        start++;
+        i++;
+        for (i < length && at(object, i) != 34) { i++; }
+        if (i == length) { ret String.new(); }
+        ret text.byte_slice(object, start, i);
+    }
+    for (i < length) {
+        const c = at(object, i);
+        if ((c >= 48 && c <= 57) || c == 46 || c == 45) { i++; }
+        else { break; }
+    }
+    text.byte_slice(object, start, i)
+}
+
+fn unsigned(object: str, key: str) u64 {
+    const raw = raw_field(object, key);
+    const result = raw.parse[u64]();
+    if (result.is_ok()) { ret result.unwrap(); }
+    0
+}
+
+fn rounded_hz(object: str) u64 {
+    const raw = raw_field(object, "refreshRate");
+    if (raw.is_empty()) { ret 0; }
+    const dot = raw.find(".");
+    if (dot.is_none()) { ret unsigned(object, "refreshRate"); }
+    const pos: usize = dot.unwrap();
+    const whole = text.byte_slice(raw.as_str(), 0, pos);
+    const parse = whole.parse[u64]();
+    if (parse.is_err()) { ret 0; }
+    var hz = parse.unwrap();
+    if (pos + 1 < raw.bytes_len() && at(raw.as_str(), pos + 1) >= 53) { hz++; }
+    hz
+}
+
+fn clean_scale(object: str) String {
+    const raw = raw_field(object, "scale");
+    const dot = raw.find(".");
+    if (dot.is_none()) { ret raw; }
+    const pos: usize = dot.unwrap();
+    var end: usize = raw.bytes_len();
+    for (end > pos + 1 && at(raw.as_str(), end - 1) == 48) { end--; }
+    if (end > 0 && at(raw.as_str(), end - 1) == 46) { end--; }
+    text.byte_slice(raw.as_str(), 0, end)
+}
+
+pub fn monitor(connector_name: str) Active {
+    @cfg(target_os = "linux") {
+        const desktop = os.env("XDG_CURRENT_DESKTOP", "");
+        if (desktop.as_str() != "Hyprland") { ret missing(); }
+        var json_text = hypr_ipc.request("j/monitors");
+        if (json_text.is_empty()) { json_text = commands.capture("hyprctl", "-j", "monitors", ""); }
+        if (json_text.is_empty()) { ret missing(); }
+        if (json.validate(json_text.as_str()).is_err()) { ret missing(); }
+        const source: str = json_text.as_str();
+        var depth: usize = 0;
+        var start: usize = 0;
+        var inside_string: bool = false;
+        var escaped: bool = false;
+        var i: usize = 0;
+        for (i < json_text.bytes_len()) {
+            const c = at(source, i);
+            if (inside_string) {
+                if (escaped) { escaped = false; }
+                else if (c == 92) { escaped = true; }
+                else if (c == 34) { inside_string = false; }
+                i++;
+                continue;
+            }
+            if (c == 34) { inside_string = true; i++; continue; }
+            if (c == 123) {
+                if (depth == 0) { start = i; }
+                depth++;
+            } else if (c == 125 && depth > 0) {
+                depth--;
+                if (depth == 0) {
+                    const object = text.byte_slice(source, start, i + 1);
+                    const name = raw_field(object.as_str(), "name");
+                    if (name.as_str() == connector_name) {
+                        ret Active {
+                            width: unsigned(object.as_str(), "width"),
+                            height: unsigned(object.as_str(), "height"),
+                            hz: rounded_hz(object.as_str()),
+                            scale: clean_scale(object.as_str()),
+                        };
+                    }
+                }
+            }
+            i++;
+        }
+    }
+    missing()
+}

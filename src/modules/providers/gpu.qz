@@ -1,0 +1,155 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// card0 may be simpledrm rather than the PCI graphics device.
+import std.core;
+import std.fs;
+import std.os;
+import text;
+import dir_entries;
+import android;
+
+fn pci_card() String {
+    const root: String = os.env("QUAZIFETCH_DRM_ROOT", "/sys/class/drm");
+    var cards = dir_entries.names(String.from(root.as_str()));
+    for (!cards.is_empty()) {
+        const entry: String = cards.remove(0);
+        const name: str = entry.as_str();
+        if (!name.starts_with("card") || name.contains("-")) { continue; }
+        const path: String = text.join(root.as_str(), "/");
+        const full: String = text.join(path.as_str(), name);
+        const vendor_path: String = text.join(full.as_str(), "/device/vendor");
+        const device_path: String = text.join(full.as_str(), "/device/device");
+        const vendor: String = text.file(vendor_path.as_str());
+        const device: String = text.file(device_path.as_str());
+        if (!vendor.is_empty() && !device.is_empty()) { ret full; }
+    }
+    String.new()
+}
+
+fn short_pci_id(input: str) String {
+    if (input.starts_with("0x") && core.strlen(input) == 6) {
+        ret text.byte_slice(input, 2, 6);
+    }
+    String.from(input)
+}
+
+// In pci.ids, vendors start at column zero and devices use one tab.
+fn pci_name_from_db(data: str, vendor_id: str, device_id: str) String {
+    const length: usize = core.strlen(data);
+    var pos: usize = 0;
+    var matched_vendor: bool = false;
+    var vendor_name: String = String.new();
+    for (pos < length) {
+        var end: usize = pos;
+        for (end < length && core.str_byte_at(data, end) != 10) { end++; }
+        const size: usize = end - pos;
+        if (size > 5 && core.str_byte_at(data, pos) != 9 &&
+            core.str_byte_at(data, pos) != 35 && core.str_byte_at(data, pos) != 32) {
+            if (matched_vendor) { break; }
+            var same: bool = true;
+            var k: usize = 0;
+            for (k < 4) {
+                if (core.str_byte_at(data, pos + k) != core.str_byte_at(vendor_id, k)) {
+                    same = false;
+                    break;
+                }
+                k++;
+            }
+            if (same && core.str_byte_at(data, pos + 4) == 32) {
+                matched_vendor = true;
+                vendor_name = text.byte_slice(data, pos + 5, end).trim();
+            }
+        } else if (matched_vendor && size > 6 && core.str_byte_at(data, pos) == 9 &&
+            core.str_byte_at(data, pos + 1) != 9) {
+            var same_device: bool = true;
+            var j: usize = 0;
+            for (j < 4) {
+                if (core.str_byte_at(data, pos + 1 + j) != core.str_byte_at(device_id, j)) {
+                    same_device = false;
+                    break;
+                }
+                j++;
+            }
+            if (same_device && core.str_byte_at(data, pos + 5) == 32) {
+                const name: String = text.byte_slice(data, pos + 6, end).trim();
+                if (vendor_name.is_empty()) { ret name; }
+                var result: String = String.from(vendor_name.as_str());
+                result = result.push_str(" ");
+                ret result.push_str(name.as_str());
+            }
+        }
+        pos = end + 1;
+    }
+    String.new()
+}
+
+fn pci_db(vendor_id: str, device_id: str) String {
+    const custom: String = os.env("QUAZIFETCH_PCI_IDS", "");
+    var paths: Array[str] = Array.new();
+    if (!custom.is_empty()) { paths.push(custom.as_str()); }
+    paths.push("/run/current-system/sw/share/hwdata/pci.ids");
+    paths.push("/run/current-system/sw/share/pci.ids");
+    paths.push("/usr/share/hwdata/pci.ids");
+    paths.push("/usr/share/misc/pci.ids");
+    paths.push("/usr/share/pci.ids");
+    var i: usize = 0;
+    for (i < paths.len()) {
+        const content = fs.read_to_string_with_limit(paths[i], 8388608);
+        if (content.is_ok()) {
+            const db: String = content.unwrap();
+            const name: String = pci_name_from_db(db.as_str(), vendor_id, device_id);
+            if (!name.is_empty()) { ret name; }
+        }
+        i++;
+    }
+    String.new()
+}
+
+fn udev_name(card: str) String {
+    const info_path: String = text.join(card, "/device/uevent");
+    const slot: String = text.file_field(info_path.as_str(), "PCI_SLOT_NAME=");
+    if (slot.is_empty()) { ret String.new(); }
+    const root: String = os.env("QUAZIFETCH_UDEV_ROOT", "/run/udev/data");
+    var path: String = text.join(root.as_str(), "/+pci:");
+    path = path.push_str(slot.as_str());
+    const model: String = text.file_field(path.as_str(), "E:ID_MODEL_FROM_DATABASE=");
+    if (model.is_empty()) { ret String.new(); }
+    const vendor: String = text.file_field(path.as_str(), "E:ID_VENDOR_FROM_DATABASE=");
+    if (vendor.is_empty() || model.starts_with(vendor.as_str())) { ret model; }
+    var full: String = String.from(vendor.as_str());
+    full = full.push_str(" ");
+    full.push_str(model.as_str())
+}
+
+pub fn name() String {
+    @cfg(target_os = "linux") {
+        const card: String = pci_card();
+        if (card.is_empty()) { ret android.gpu_name(); }
+        const vendor_path: String = text.join(card.as_str(), "/device/vendor");
+        const device_path: String = text.join(card.as_str(), "/device/device");
+        const raw_vendor: String = text.file(vendor_path.as_str());
+        const raw_device: String = text.file(device_path.as_str());
+        const vendor: String = short_pci_id(raw_vendor.as_str());
+        const device: String = short_pci_id(raw_device.as_str());
+        const udev: String = udev_name(card.as_str());
+        if (!udev.is_empty()) { ret udev; }
+        const from_pci_ids: String = pci_db(vendor.as_str(), device.as_str());
+        if (!from_pci_ids.is_empty()) { ret from_pci_ids; }
+        var fallback: String = String.from("PCI ");
+        fallback = fallback.push_str(vendor.as_str());
+        fallback = fallback.push_str(":");
+        ret fallback.push_str(device.as_str());
+    }
+    String.new()
+}
+
+pub fn driver() String {
+    @cfg(target_os = "linux") {
+        const card: String = pci_card();
+        if (card.is_empty()) { ret String.new(); }
+        const uevent: String = text.join(card.as_str(), "/device/uevent");
+        ret text.file_field(uevent.as_str(), "DRIVER=");
+    }
+    String.new()
+}

@@ -1,0 +1,194 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.core;
+import std.fs;
+import std.os;
+
+pub fn file(path: str) String {
+    const result = fs.read_to_string_with_limit(path, 2097152);
+    if (result.is_err()) { ret String.new(); }
+    const contents: String = result.unwrap();
+    contents.trim()
+}
+
+// find() returns byte offsets, while Quazi slices by rune index.
+fn rune_offset(input: str, byte_offset: usize) isize {
+    var count: isize = 0;
+    var i: usize = 0;
+    for (i < byte_offset) {
+        const b: u8 = core.str_byte_at(input, i);
+        if ((b & 192) != 128) { count++; }
+        i++;
+    }
+    count
+}
+
+pub fn byte_slice(input: str, from: usize, until: usize) String {
+    input[rune_offset(input, from):rune_offset(input, until)]
+}
+
+pub fn basename(path: str) String {
+    var from: usize = 0;
+    var i: usize = 0;
+    const length: usize = core.strlen(path);
+    for (i < length) {
+        const c: u8 = core.str_byte_at(path, i);
+        if (c == 47 || c == 92) { from = i + 1; }
+        i++;
+    }
+    byte_slice(path, from, length)
+}
+
+// Compare prefixes in place to avoid repeatedly slicing large files.
+pub fn field(data: str, prefix: str) String {
+    const length: usize = core.strlen(data);
+    const wanted: usize = core.strlen(prefix);
+    var start: usize = 0;
+    var i: usize = 0;
+    for (i <= length) {
+        if (i == length || core.str_byte_at(data, i) == 10) {
+            if (i - start >= wanted) {
+                var matches: bool = true;
+                var j: usize = 0;
+                for (j < wanted) {
+                    if (core.str_byte_at(data, start + j) != core.str_byte_at(prefix, j)) {
+                        matches = false;
+                        break;
+                    }
+                    j++;
+                }
+                if (matches) {
+                    const raw = byte_slice(data, start + wanted, i);
+                    const trimmed = raw.trim();
+                    const value: str = trimmed.as_str();
+                    const n: usize = core.strlen(value);
+                    if (n >= 2 && core.str_byte_at(value, 0) == 34 && core.str_byte_at(value, n - 1) == 34) {
+                        ret byte_slice(value, 1, n - 1);
+                    }
+                    ret String.from(value);
+                }
+            }
+            start = i + 1;
+        }
+        i++;
+    }
+    String.new()
+}
+
+pub fn file_field(path: str, prefix: str) String {
+    const data: String = file(path);
+    if (data.is_empty()) { ret String.new(); }
+    field(data.as_str(), prefix)
+}
+
+pub fn first_env(primary: str, secondary: str) String {
+    const first: String = os.env(primary, "");
+    if (!first.is_empty()) { ret String.from(first.as_str()); }
+    os.env(secondary, "")
+}
+
+pub fn count_lines(data: str, prefix: str) usize {
+    const length: usize = core.strlen(data);
+    const wanted: usize = core.strlen(prefix);
+    var count: usize = 0;
+    var start: usize = 0;
+    for (start + wanted <= length) {
+        var matches: bool = true;
+        var j: usize = 0;
+        for (j < wanted) {
+            if (core.str_byte_at(data, start + j) != core.str_byte_at(prefix, j)) {
+                matches = false;
+                break;
+            }
+            j++;
+        }
+        if (matches) { count++; }
+        for (start < length && core.str_byte_at(data, start) != 10) { start++; }
+        if (start == length) { break; }
+        start++;
+    }
+    count
+}
+
+
+pub fn join(left: str, right: str) String {
+    const prefix: String = String.from(left);
+    prefix.push_str(right)
+}
+
+pub fn count_directory(path: str) usize {
+    const count = fs.count_entries(path);
+    if (count.is_err()) { ret 0; }
+    count.unwrap()
+}
+
+pub fn human_bytes(value: u64) String {
+    if (value == 0) { ret String.from("0 B"); }
+    var unit: u64 = 1073741824;
+    var suffix: str = " GiB";
+    if (value < unit) { unit = 1048576; suffix = " MiB"; }
+    if (value < unit) { unit = 1024; suffix = " KiB"; }
+    if (value < unit) { ret value.to_string().push_str(" B"); }
+    var whole: u64 = value / unit;
+    var fraction: u64 = ((value % unit) * 100 + unit / 2) / unit;
+    if (fraction >= 100) { whole++; fraction = 0; }
+    const lead: String = whole.to_string();
+    var output: String = String.from(lead.as_str());
+    output = output.push_str(".");
+    if (fraction < 10) { output = output.push_str("0"); }
+    const tail: String = fraction.to_string();
+    output = output.push_str(tail.as_str());
+    output.push_str(suffix)
+}
+
+pub fn hours_minutes(hours: u64, minutes: u64, show_zero_hours: bool) String {
+    var output = String.new();
+    if (hours > 0 || show_zero_hours) {
+        output = hours.to_string();
+        if (hours == 1) { output = output.push_str(" hour, "); }
+        else { output = output.push_str(" hours, "); }
+    }
+    const m = minutes.to_string();
+    output = output.push_str(m.as_str());
+    if (minutes == 1) { ret output.push_str(" min"); }
+    output.push_str(" mins")
+}
+
+pub fn utilization(used: u64, total: u64) String {
+    if (total == 0) { ret String.new(); }
+    const a: String = human_bytes(used);
+    const b: String = human_bytes(total);
+    var result: String = String.from(a.as_str());
+    result = result.push_str(" / ");
+    result = result.push_str(b.as_str());
+    result = result.push_str(" (");
+    // Divide first to keep the intermediate value in range.
+    const percentage: u64 = (used / total) * 100 +
+        (((used % total) * 100 + total / 2) / total);
+    const number: String = percentage.to_string();
+    result = result.push_str(number.as_str());
+    result.push_str("%)")
+}
+
+pub fn count_occurrences(data: str, needle: str) usize {
+    const n: usize = core.strlen(data);
+    const m: usize = core.strlen(needle);
+    if (m == 0 || n < m) { ret 0; }
+    var count: usize = 0;
+    var i: usize = 0;
+    for (i + m <= n) {
+        var matching: bool = true;
+        var j: usize = 0;
+        for (j < m) {
+            if (core.str_byte_at(data, i + j) != core.str_byte_at(needle, j)) {
+                matching = false;
+                break;
+            }
+            j++;
+        }
+        if (matching) { count++; i += m; }
+        else { i++; }
+    }
+    count
+}

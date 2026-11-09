@@ -1,0 +1,253 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Capture command output without going through a shell.
+import std.core;
+import std.unix;
+import std.process;
+import std.os;
+import std.time;
+import text;
+import version_cache;
+
+fn close_fd(fd: i32) void { unsafe { unix.close(fd); } }
+
+fn check_executable(path: str) bool {
+    var ok: i32 = -1;
+    unsafe { ok = unix.access(path, 1); }
+    ok == 0
+}
+
+pub fn executable(name: str) String {
+    @cfg(target_os = "linux") {
+        const path: String = os.env("PATH", "");
+        var start: usize = 0;
+        var i: usize = 0;
+        const length: usize = path.bytes_len();
+        for (i <= length) {
+            if (i == length || core.str_byte_at(path.as_str(), i) == 58) {
+                if (i > start) {
+                    const dir = text.byte_slice(path.as_str(), start, i);
+                    const candidate = text.join(text.join(dir.as_str(), "/").as_str(), name);
+                    if (check_executable(candidate.as_str())) { ret candidate; }
+                }
+                start = i + 1;
+            }
+            i++;
+        }
+    }
+    String.new()
+}
+
+// Monotonic time keeps command deadlines independent of clock adjustments.
+pub fn monotonic_ms() u64 {
+    @cfg(target_os = "linux") {
+        var buffer: *u8 = 0;
+        unsafe { buffer = core.malloc(16); }
+        if (buffer == 0) { ret 0; }
+        var code: i32 = -1;
+        unsafe { code = unix.clock_gettime(1, buffer); }
+        if (code != 0) { unsafe { core.free(buffer); } ret 0; }
+        var seconds: i64 = 0;
+        var nanoseconds: i64 = 0;
+        unsafe {
+            seconds = *(buffer as *i64);
+            nanoseconds = *((buffer + 8) as *i64);
+            core.free(buffer);
+        }
+        if (seconds < 0 || nanoseconds < 0 || nanoseconds >= 1000000000) { ret 0; }
+        ret (seconds as u64) * 1000 + (nanoseconds as u64) / 1000000;
+    }
+    0
+}
+
+// A child may keep stdout open indefinitely. Poll until the deadline,
+// then terminate and reap it.
+pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms: u64) String {
+    @cfg(target_os = "linux") {
+        if (timeout_ms == 0) { ret String.new(); }
+        const executable_path = executable(program);
+        if (executable_path.is_empty()) { ret String.new(); }
+        var argv: Array[str] = Array.new();
+        if (arg1 != "") { argv.push(arg1); }
+        if (arg2 != "") { argv.push(arg2); }
+        if (arg3 != "") { argv.push(arg3); }
+        var fds: *u8 = 0;
+        unsafe { fds = core.malloc(8); }
+        if (fds == 0) { ret String.new(); }
+        var opened: i32 = -1;
+        unsafe { opened = unix.pipe2(fds, 524288); } // O_CLOEXEC
+        if (opened < 0) { unsafe { core.free(fds); } ret String.new(); }
+        var input: i32 = -1;
+        var output: i32 = -1;
+        unsafe {
+            input = *(fds as *i32);
+            output = *((fds + 4) as *i32);
+            core.free(fds);
+        }
+        const started: u64 = monotonic_ms();
+        if (started == 0) { close_fd(input); close_fd(output); ret String.new(); }
+        var saved: i32 = -1;
+        unsafe { saved = unix.dup(1); }
+        var redirected: i32 = -1;
+        if (saved >= 0) { unsafe { redirected = unix.dup2(output, 1); } }
+        if (saved < 0 || redirected < 0) {
+            if (saved >= 0) { close_fd(saved); }
+            close_fd(input);
+            close_fd(output);
+            ret String.new();
+        }
+        var saved_error: i32 = -1;
+        var devnull: i32 = -1;
+        unsafe {
+            saved_error = unix.dup(2);
+            devnull = unix.open("/dev/null", 1, 0);
+            if (saved_error >= 0 && devnull >= 0) { unix.dup2(devnull, 2); }
+        }
+        const launched = process.spawn(executable_path.as_str(), argv);
+        unsafe {
+            unix.dup2(saved, 1);
+            if (saved_error >= 0) { unix.dup2(saved_error, 2); }
+        }
+        if (saved_error >= 0) { close_fd(saved_error); }
+        if (devnull >= 0) { close_fd(devnull); }
+        close_fd(saved);
+        close_fd(output);
+        if (launched.is_err()) { close_fd(input); ret String.new(); }
+        var child = launched.unwrap();
+        const max_output: usize = 2097152;
+        var buffer: *u8 = 0;
+        var ready: *u8 = 0;
+        unsafe {
+            buffer = core.malloc(max_output + 1);
+            ready = core.malloc(8);
+        }
+        if (buffer == 0 || ready == 0) {
+            if (buffer != 0) { unsafe { core.free(buffer); } }
+            if (ready != 0) { unsafe { core.free(ready); } }
+            close_fd(input);
+            const closed = child.close();
+            ret String.new();
+        }
+        unsafe {
+            *(ready as *i32) = input;
+            *((ready + 4) as *i32) = 1; // POLLIN (short), revents = 0
+        }
+        var used: usize = 0;
+        var finished_reading: bool = false;
+        var bad_output: bool = false;
+        for (!finished_reading && used < max_output) {
+            var wait_ms: i32 = 100;
+            const now: u64 = monotonic_ms();
+            if (now == 0 || now - started >= timeout_ms) { bad_output = true; break; }
+            const remaining: u64 = timeout_ms - (now - started);
+            if (remaining < 100) { wait_ms = remaining as i32; }
+            var polled: i32 = -1;
+            unsafe { polled = unix.poll(ready, 1, wait_ms); }
+            if (polled == -4) { continue; } // EINTR
+            if (polled < 0) { bad_output = true; break; }
+            if (polled == 0) { continue; }
+            var n: isize = -1;
+            unsafe { n = unix.read(input, buffer + used, max_output - used); }
+            if (n == -4) { continue; }
+            if (n < 0) { bad_output = true; break; }
+            if (n == 0) { finished_reading = true; break; }
+            used += n as usize;
+        }
+        if (used == max_output) { bad_output = true; }
+        close_fd(input);
+        unsafe { core.free(ready); }
+        if (bad_output || !finished_reading) {
+            const stopped = child.close();
+            unsafe { core.free(buffer); }
+            ret String.new();
+        }
+        // A process may close stdout and continue running. Keep the deadline.
+        var complete: bool = false;
+        var success: bool = false;
+        for (!complete) {
+            const exited = child.try_wait();
+            if (exited.is_err()) { break; }
+            const observed = exited.unwrap();
+            if (observed.is_some()) {
+                const status = observed.unwrap();
+                success = match status {
+                    Code(value) => value == 0,
+                    Signal(_) => false,
+                };
+                complete = true;
+                break;
+            }
+            const now: u64 = monotonic_ms();
+            if (now == 0 || now - started >= timeout_ms) { break; }
+            time.sleep(time.Duration.from_milliseconds(10));
+        }
+        if (!complete) {
+            const stopped = child.close();
+            unsafe { core.free(buffer); }
+            ret String.new();
+        }
+        var value: String = String.new();
+        if (used > 0 && success) {
+            unsafe {
+                *(buffer + used) = 0;
+                value = String.from(core.str_from_ptr(buffer));
+            }
+        }
+        unsafe { core.free(buffer); }
+        ret value;
+    }
+    String.new()
+}
+
+pub fn capture(program: str, arg1: str, arg2: str, arg3: str) String {
+    capture_timeout(program, arg1, arg2, arg3, 2500)
+}
+
+// Accept dotted versions from common --version output formats.
+pub fn parse_version(output: str) String {
+    const length: usize = output.bytes_len();
+    var i: usize = 0;
+    for (i + 2 < length) {
+        const a: u8 = core.str_byte_at(output, i);
+        if (a < 48 || a > 57) { i++; continue; }
+        // Do not match a version embedded in an identifier.
+        if (i > 0) {
+            const prev: u8 = core.str_byte_at(output, i - 1);
+            if ((prev >= 48 && prev <= 57) || (prev >= 65 && prev <= 90) ||
+                (prev >= 97 && prev <= 122)) { i++; continue; }
+        }
+        var j: usize = i;
+        var saw_dot: bool = false;
+        for (j < length) {
+            const c: u8 = core.str_byte_at(output, j);
+            if (c >= 48 && c <= 57) { j++; continue; }
+            if (c == 46 && j > i && j + 1 < length) {
+                const next: u8 = core.str_byte_at(output, j + 1);
+                if (next >= 48 && next <= 57) { saw_dot = true; j++; continue; }
+            }
+            break;
+        }
+        if (saw_dot) { ret text.byte_slice(output, i, j); }
+        i++;
+    }
+    String.new()
+}
+
+pub fn version(program: str, argument: str) String {
+    const path = executable(program);
+    if (path.is_empty()) { ret String.new(); }
+    const cached = version_cache.load(program, path.as_str());
+    if (!cached.is_empty()) { ret cached; }
+    const content = capture(program, argument, "", "");
+    if (content.is_empty()) { ret String.new(); }
+    var parsed: String = String.new();
+    const tag = content.find("Tag: v");
+    if (tag.is_some()) {
+        const suffix = text.byte_slice(content.as_str(), tag.unwrap() + 6, content.bytes_len());
+        parsed = parse_version(suffix.as_str());
+    }
+    if (parsed.is_empty()) { parsed = parse_version(content.as_str()); }
+    if (!parsed.is_empty()) { version_cache.save(program, path.as_str(), parsed.as_str()); }
+    parsed
+}

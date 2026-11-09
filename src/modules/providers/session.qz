@@ -1,0 +1,155 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import std.core;
+import text;
+import display;
+import commands;
+import hypr_ipc;
+import android;
+
+fn protocol() String {
+    const session_type: String = os.env("XDG_SESSION_TYPE", "");
+    if (session_type.as_str() == "wayland") { ret String.from("Wayland"); }
+    if (session_type.as_str() == "x11") { ret String.from("X11"); }
+    if (!os.env("WAYLAND_DISPLAY", "").is_empty()) { ret String.from("Wayland"); }
+    if (!os.env("DISPLAY", "").is_empty()) { ret String.from("X11"); }
+    String.new()
+}
+
+fn is_standalone_wm(name: str) bool {
+    name == "Hyprland" || name == "sway" || name == "swayfx" ||
+        name == "river" || name == "niri" || name == "labwc" ||
+        name == "dwm" || name == "i3" || name == "bspwm" ||
+        name == "awesome" || name == "openbox" || name == "qtile" ||
+        name == "weston" || name == "cwm"
+}
+
+fn compose(name: str, version: str, with_protocol: bool) String {
+    if (name == "") { ret String.new(); }
+    var output = String.from(name);
+    if (version != "") {
+        output = output.push_str(" ");
+        output = output.push_str(version);
+    }
+    if (with_protocol) {
+        const p = protocol();
+        if (!p.is_empty()) {
+            output = output.push_str(" (");
+            output = output.push_str(p.as_str());
+            output = output.push_str(")");
+        }
+    }
+    output
+}
+
+fn terminal_name() String {
+    if (android.is_termux()) { ret String.from("Termux"); }
+    const program = os.env("TERM_PROGRAM", "");
+    if (!program.is_empty()) { ret program; }
+    const detected: String = os.terminal();
+    if (detected.as_str() == "unknown") { ret String.new(); }
+    detected
+}
+
+fn wm_name() String {
+    var name: String = text.first_env("WINDOWMANAGER", "WM");
+    if (name.is_empty()) {
+        const desktop: String = os.env("XDG_CURRENT_DESKTOP", "");
+        if (is_standalone_wm(desktop.as_str())) { name = desktop; }
+    }
+    if (name.is_empty()) { ret String.new(); }
+    text.basename(name.as_str())
+}
+
+fn wm_version(name: str) String {
+    if (name == "Hyprland") {
+        const response = hypr_ipc.request("j/version");
+        if (!response.is_empty()) {
+            var point = response.find("\"tag\"");
+            if (point.is_none()) { point = response.find("\"version\""); }
+            if (point.is_some()) {
+                var from: usize = point.unwrap() + 5;
+                for (from < response.bytes_len()) {
+                    const c = core.str_byte_at(response.as_str(), from);
+                    if (c >= 48 && c <= 57) { break; }
+                    from++;
+                }
+                const suffix = text.byte_slice(response.as_str(), from, response.bytes_len());
+                const parsed = commands.parse_version(suffix.as_str());
+                if (!parsed.is_empty()) { ret parsed; }
+            }
+        }
+        ret commands.version("Hyprland", "--version");
+    }
+    if (name == "sway" || name == "swayfx") { ret commands.version(name, "--version"); }
+    if (name == "niri" || name == "labwc" || name == "river" ||
+        name == "i3" || name == "openbox" || name == "weston") {
+        ret commands.version(name, "--version");
+    }
+    String.new()
+}
+
+fn de_version(name: str) String {
+    if (name == "GNOME") { ret commands.version("gnome-shell", "--version"); }
+    if (name == "KDE" || name == "KDE Plasma") { ret commands.version("plasmashell", "--version"); }
+    if (name == "XFCE" || name == "Xfce") { ret commands.version("xfce4-session", "--version"); }
+    if (name == "Cinnamon") { ret commands.version("cinnamon", "--version"); }
+    String.new()
+}
+
+fn shell_version(name: str) String {
+    if (name == "fish" || name == "bash" || name == "zsh" || name == "nushell" || name == "nu") {
+        if (name == "nu") { ret commands.version("nu", "--version"); }
+        ret commands.version(name, "--version");
+    }
+    String.new()
+}
+
+fn terminal_version(name: str) String {
+    if (name == "foot" || name == "kitty" || name == "alacritty" ||
+        name == "wezterm" || name == "konsole" || name == "xterm") {
+        ret commands.version(name, "--version");
+    }
+    String.new()
+}
+
+pub fn lookup(key: str) String {
+    if (key == "shell") {
+        const full: String = os.shell();
+        if (full.is_empty() || full.as_str() == "unknown") { ret String.new(); }
+        const name = text.basename(full.as_str());
+        const version = shell_version(name.as_str());
+        ret compose(name.as_str(), version.as_str(), false);
+    }
+    if (key == "terminal") {
+        const name = terminal_name();
+        if (name.is_empty()) { ret String.new(); }
+        if (name.as_str() == "Termux") {
+            const release = os.env("TERMUX_VERSION", "");
+            ret compose(name.as_str(), release.as_str(), false);
+        }
+        const version = terminal_version(name.as_str());
+        ret compose(name.as_str(), version.as_str(), false);
+    }
+    if (key == "de") {
+        var name: String = os.env("XDG_CURRENT_DESKTOP", "");
+        if (name.is_empty()) { name = text.first_env("XDG_SESSION_DESKTOP", "DESKTOP_SESSION"); }
+        if (name.is_empty() || is_standalone_wm(name.as_str())) { ret String.new(); }
+        const version = de_version(name.as_str());
+        ret compose(name.as_str(), version.as_str(), true);
+    }
+    if (key == "wm") {
+        const name = wm_name();
+        const version = wm_version(name.as_str());
+        ret compose(name.as_str(), version.as_str(), true);
+    }
+    if (key == "session") {
+        @cfg(target_os = "windows") { ret os.env("SESSIONNAME", ""); }
+        ret protocol();
+    }
+    if (key == "display") { ret display.value(); }
+    if (key == "display_label") { ret display.label(); }
+    String.new()
+}

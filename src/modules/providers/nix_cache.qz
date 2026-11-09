@@ -1,0 +1,123 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Nix profiles point to immutable store objects. Their metadata lets us
+// reuse a count without querying nix-store on every run.
+import std.core;
+import std.fs;
+import std.os;
+import text;
+import std.unix;
+
+fn root() String {
+    const custom = os.env("XDG_CACHE_HOME", "");
+    if (!custom.is_empty()) { ret custom; }
+    const home = os.env("HOME", "");
+    if (home.is_empty()) { ret String.new(); }
+    text.join(home.as_str(), "/.cache")
+}
+
+// Nix counts and version strings share the same cache directory.
+pub fn cache_file(filename: str, create: bool) String {
+    const base = root();
+    if (base.is_empty()) { ret String.new(); }
+    if (create) { const a = fs.mkdir(base.as_str()); }
+    const folder = text.join(base.as_str(), "/quazifetch");
+    if (create) { const b = fs.mkdir(folder.as_str()); }
+    text.join(folder.as_str(), filename)
+}
+
+fn file_for(role: str, create: bool) String {
+    var name = text.join("/nix-", role);
+    name = name.push_str(".txt");
+    cache_file(name.as_str(), create)
+}
+
+// Linux x86-64 stat layout: dev 0, inode 8, size 48, mtime 88.
+// stat follows the profile symlink, so switching generations changes the key.
+pub fn fingerprint(path: str) String {
+    @cfg(target_os = "linux") {
+        var raw: *u8 = 0;
+        unsafe { raw = core.malloc(144); }
+        if (raw == 0) { ret String.new(); }
+        var result: i32 = -1;
+        unsafe { result = unix.stat(path, raw); }
+        if (result != 0) { unsafe { core.free(raw); } ret String.new(); }
+        var dev: u64 = 0;
+        var inode: u64 = 0;
+        var size: u64 = 0;
+        var mt: u64 = 0;
+        var mt_ns: u64 = 0;
+        unsafe {
+            dev = *(raw as *u64);
+            inode = *((raw + 8) as *u64);
+            size = *((raw + 48) as *u64);
+            mt = *((raw + 88) as *u64);
+            mt_ns = *((raw + 96) as *u64);
+            core.free(raw);
+        }
+        var key = dev.to_string();
+        key = key.push_str(":");
+        key = key.push_str(inode.to_string().as_str());
+        key = key.push_str(":");
+        key = key.push_str(size.to_string().as_str());
+        key = key.push_str(":");
+        key = key.push_str(mt.to_string().as_str());
+        key = key.push_str(":");
+        ret key.push_str(mt_ns.to_string().as_str());
+    }
+    String.new()
+}
+
+fn prefix(profile: str) String {
+    const stamp = fingerprint(profile);
+    if (stamp.is_empty()) { ret String.new(); }
+    var s = text.join("QZNIX1\n", profile);
+    s = s.push_str("\n");
+    s = s.push_str(stamp.as_str());
+    s.push_str("\n")
+}
+
+pub fn load(role: str, profile: str) usize {
+    @cfg(target_os = "linux") {
+        const path = file_for(role, false);
+        if (path.is_empty()) { ret 0; }
+        const expected = prefix(profile);
+        if (expected.is_empty()) { ret 0; }
+        const read = fs.read_to_string_with_limit(path.as_str(), 512);
+        if (read.is_err()) { ret 0; }
+        const data = read.unwrap();
+        if (!data.starts_with(expected.as_str())) { ret 0; }
+        const suffix = text.byte_slice(data.as_str(), expected.bytes_len(), data.bytes_len());
+        const parsed = suffix.trim().parse[usize]();
+        if (parsed.is_ok()) { ret parsed.unwrap(); }
+    }
+    0
+}
+
+pub fn save(role: str, profile: str, count: usize) void {
+    @cfg(target_os = "linux") {
+        if (count == 0) { ret; }
+        const expected = prefix(profile);
+        if (expected.is_empty()) { ret; }
+        const path = file_for(role, true);
+        if (path.is_empty()) { ret; }
+        var temporary = text.join(path.as_str(), ".");
+        var pid: i32 = 0;
+        unsafe { pid = unix.getpid(); }
+        temporary = temporary.push_str(pid.to_string().as_str());
+        const created = fs.File.create(temporary.as_str());
+        if (created.is_err()) { ret; }
+        var file = created.unwrap();
+        var content = expected.push_str(count.to_string().as_str());
+        content = content.push_str("\n");
+        const written = file.write_str(content.as_str());
+        const closed = file.close();
+        if (written.is_err() || written.unwrap() != content.bytes_len() || closed.is_err()) {
+            const discarded = fs.remove(temporary.as_str());
+            ret;
+        }
+        const renamed = fs.rename(temporary.as_str(), path.as_str());
+        if (renamed.is_err()) { const discarded = fs.remove(temporary.as_str()); }
+    }
+}

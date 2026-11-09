@@ -1,0 +1,52 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import registry;
+
+pub fn for_key(key: str) String {
+    if (key == "os") { ret String.from("OS"); }
+    if (key == "machine") { ret String.from("Host"); }
+    if (key == "kernel") { ret String.from("Kernel"); }
+    if (key == "uptime") { ret String.from("Uptime"); }
+    if (key == "packages") { ret String.from("Packages"); }
+    if (key == "init") { ret String.from("Init"); }
+    if (key == "shell") { ret String.from("Shell"); }
+    if (key == "display") {
+        const name = registry.lookup("display_label");
+        if (!name.is_empty()) { ret name; }
+        ret String.from("Display");
+    }
+    if (key == "wm") { ret String.from("Window Manager"); }
+    if (key == "de") { ret String.from("DE"); }
+    if (key == "terminal") { ret String.from("Terminal"); }
+    if (key == "cpu") { ret String.from("CPU"); }
+    if (key == "gpu") { ret String.from("GPU"); }
+    if (key == "ram") { ret String.from("Memory"); }
+    if (key == "swap") { ret String.from("Swap"); }
+    if (key == "disk") {
+        const name = registry.lookup("disk_label");
+        if (!name.is_empty()) { ret name; }
+        ret String.from("Disk (/)");
+    }
+    if (key == "battery") {
+        const name = registry.lookup("battery_label");
+        if (!name.is_empty()) { ret name; }
+        ret String.from("Battery");
+    }
+    if (key == "locale") { ret String.from("Locale"); }
+    if (key == "timezone") { ret String.from("Timezone"); }
+    if (key == "arch") { ret String.from("Architecture"); }
+    if (key == "distro") { ret String.from("Distro"); }
+    if (key == "gpu_driver") { ret String.from("GPU Driver"); }
+    if (key == "cpu_threads") { ret String.from("CPU Threads"); }
+    if (key == "board") { ret String.from("Board"); }
+    if (key == "vendor") { ret String.from("Vendor"); }
+    if (key == "firmware") { ret String.from("Firmware"); }
+    if (key == "session") { ret String.from("Session"); }
+    if (key == "home") { ret String.from("Home"); }
+    if (key == "editor") { ret String.from("Editor"); }
+    if (key == "pid") { ret String.from("PID"); }
+    if (key == "hostname") { ret String.from("Hostname"); }
+    if (key == "username") { ret String.from("Username"); }
+    String.new()
+}

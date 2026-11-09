@@ -1,0 +1,185 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+import gpu;
+import dir_entries;
+import disk;
+import android;
+
+fn memory() String {
+    const total: u64 = os.memory_total();
+    if (total == 0) { ret String.new(); }
+    const available: u64 = os.memory_available();
+    var used: u64 = 0;
+    if (available <= total) { used = total - available; }
+    text.utilization(used, total)
+}
+
+fn threads() String {
+    @cfg(target_os = "linux") {
+        const data: String = text.file("/proc/cpuinfo");
+        if (data.is_empty()) { ret String.new(); }
+        const count: usize = text.count_lines(data.as_str(), "processor");
+        if (count > 0) { ret count.to_string(); }
+    }
+    String.new()
+}
+
+// Use the kernel-reported maximum clock when it is available.
+fn cpu() String {
+    const model: String = os.cpu_name();
+    if (model.is_empty() || model.as_str() == "unknown") { ret String.new(); }
+    @cfg(target_os = "linux") {
+        var max_clock: String = text.file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+        if (max_clock.is_empty()) {
+            max_clock = text.file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq");
+        }
+        const parsed = max_clock.as_str().parse[u64]();
+        if (parsed.is_ok()) {
+            const khz: u64 = parsed.unwrap();
+            if (khz >= 100000 && khz <= 10000000) {
+                var clean: String = String.from(model.as_str());
+                const suffix = model.find(" CPU @ ");
+                if (suffix.is_some()) {
+                    clean = text.byte_slice(model.as_str(), 0, suffix.unwrap());
+                }
+                const threads_count: String = threads();
+                if (!threads_count.is_empty()) {
+                    clean = clean.push_str(" (");
+                    clean = clean.push_str(threads_count.as_str());
+                    clean = clean.push_str(")");
+                }
+                var ghz: u64 = khz / 1000000;
+                var frac: u64 = ((khz % 1000000) * 100 + 500000) / 1000000;
+                if (frac >= 100) { ghz++; frac = 0; }
+                const whole: String = ghz.to_string();
+                clean = clean.push_str(" @ ");
+                clean = clean.push_str(whole.as_str());
+                clean = clean.push_str(".");
+                if (frac < 10) { clean = clean.push_str("0"); }
+                const fraction: String = frac.to_string();
+                clean = clean.push_str(fraction.as_str());
+                ret clean.push_str(" GHz");
+            }
+        }
+    }
+    model
+}
+
+// Battery names differ across machines.
+fn battery_device() String {
+    @cfg(target_os = "linux") {
+        const root = os.env("QUAZIFETCH_POWER_ROOT", "/sys/class/power_supply");
+        var devices = dir_entries.names(String.from(root.as_str()));
+        for (!devices.is_empty()) {
+            const device = devices.remove(0);
+            const path = text.join(text.join(root.as_str(), "/").as_str(), device.as_str());
+            const kind = text.file(text.join(path.as_str(), "/type").as_str());
+            if (kind.as_str() == "Battery") { ret path; }
+        }
+    }
+    String.new()
+}
+
+fn battery_value(path: str, field: str) u64 {
+    const raw = text.file(text.join(path, field).as_str());
+    const parsed = raw.parse[u64]();
+    if (parsed.is_ok()) { ret parsed.unwrap(); }
+    0
+}
+
+fn battery_label() String {
+    const path = battery_device();
+    if (path.is_empty()) { ret String.new(); }
+    const model = text.file(text.join(path.as_str(), "/model_name").as_str());
+    if (model.is_empty()) { ret String.from("Battery"); }
+    var label = String.from("Battery (");
+    label = label.push_str(model.as_str());
+    label.push_str(")")
+}
+
+fn battery() String {
+    const path = battery_device();
+    if (path.is_empty()) { ret String.new(); }
+    const capacity = text.file(text.join(path.as_str(), "/capacity").as_str());
+    if (capacity.is_empty()) { ret String.new(); }
+    var result = capacity.push_str("%");
+    const state = text.file(text.join(path.as_str(), "/status").as_str());
+    if (state.as_str() == "Discharging") {
+        var remaining = battery_value(path.as_str(), "/energy_now");
+        var rate = battery_value(path.as_str(), "/power_now");
+        if (rate == 0) {
+            remaining = battery_value(path.as_str(), "/charge_now");
+            rate = battery_value(path.as_str(), "/current_now");
+        }
+        // Energy/power and charge/current both give hours; reject implausible results.
+        if (rate > 0 && remaining < 100000000000) {
+            const minutes: u64 = (remaining * 60 + rate / 2) / rate;
+            if (minutes > 0 && minutes <= 2880) {
+                const h = text.hours_minutes(minutes / 60, minutes % 60, false);
+                result = result.push_str(" (");
+                result = result.push_str(h.as_str());
+                result = result.push_str(" remaining)");
+            }
+        }
+    }
+    if (!state.is_empty() && state.as_str() != "Unknown") {
+        result = result.push_str(" [");
+        result = result.push_str(state.as_str());
+        result = result.push_str("]");
+    }
+    result
+}
+
+fn memory_kib(data: str, label: str) u64 {
+    const value: String = text.field(data, label);
+    const space = value.find(" ");
+    if (space.is_none()) { ret 0; }
+    const number: String = text.byte_slice(value.as_str(), 0, space.unwrap());
+    const parsed = number.as_str().parse[u64]();
+    if (parsed.is_err()) { ret 0; }
+    parsed.unwrap()
+}
+
+fn swap() String {
+    @cfg(target_os = "linux") {
+        const data: String = text.file("/proc/meminfo");
+        if (data.is_empty() || !data.contains("SwapTotal:")) { ret String.new(); }
+        const total: u64 = memory_kib(data.as_str(), "SwapTotal:");
+        const free: u64 = memory_kib(data.as_str(), "SwapFree:");
+        var used: u64 = 0;
+        if (free <= total) { used = total - free; }
+        ret text.utilization(used * 1024, total * 1024);
+    }
+    String.new()
+}
+
+pub fn lookup(key: str) String {
+    if (key == "cpu") { ret cpu(); }
+    if (key == "ram") { ret memory(); }
+    if (key == "swap") { ret swap(); }
+    if (key == "cpu_threads") { ret threads(); }
+    if (key == "battery") { ret battery(); }
+    if (key == "battery_label") { ret battery_label(); }
+    if (key == "gpu") { ret gpu.name(); }
+    if (key == "disk") { ret disk.root_usage(); }
+    if (key == "disk_label") { ret disk.label(); }
+    if (key == "gpu_driver") { ret gpu.driver(); }
+    if (key == "machine") {
+        const mobile = android.model();
+        if (!mobile.is_empty()) { ret mobile; }
+        @cfg(target_os = "linux") { ret text.file("/sys/devices/virtual/dmi/id/product_name"); }
+    }
+    if (key == "board") {
+        @cfg(target_os = "linux") { ret text.file("/sys/devices/virtual/dmi/id/board_name"); }
+    }
+    if (key == "vendor") {
+        @cfg(target_os = "linux") { ret text.file("/sys/devices/virtual/dmi/id/sys_vendor"); }
+    }
+    if (key == "firmware") {
+        @cfg(target_os = "linux") { ret text.file("/sys/devices/virtual/dmi/id/bios_version"); }
+    }
+    String.new()
+}

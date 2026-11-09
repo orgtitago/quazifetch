@@ -1,0 +1,43 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Changes here take effect after rebuilding.
+// The label color is shared by every module.
+pub fn label_color() str { "\e[1;38;5;147m" }
+pub fn value_color() str { "\e[0;37m" }
+
+// Color bands for percentages shown in the output.
+pub fn percent_low_max() u64 { 39 }
+pub fn percent_medium_max() u64 { 79 }
+pub fn percent_low_color() str { "\e[0;32m" }
+pub fn percent_medium_color() str { "\e[0;33m" }
+pub fn percent_high_color() str { "\e[0;31m" }
+
+// Module order. Unavailable fields are skipped.
+pub fn layout() Array[str] {
+    var lines: Array[str] = Array.new();
+    lines.push("blank");
+    lines.push("header");
+    lines.push("separator");
+    lines.push("os");
+    lines.push("machine");
+    lines.push("kernel");
+    lines.push("uptime");
+    lines.push("packages");
+    lines.push("init");
+    lines.push("shell");
+    lines.push("display");
+    lines.push("wm");
+    lines.push("de");
+    lines.push("terminal");
+    lines.push("cpu");
+    lines.push("gpu");
+    lines.push("ram");
+    lines.push("swap");
+    lines.push("disk");
+    lines.push("battery");
+    lines.push("locale");
+    lines.push("timezone");
+    lines.push("blank");
+    lines
+}

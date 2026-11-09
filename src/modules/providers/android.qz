@@ -1,0 +1,78 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Termux host details can be read from environment variables and sysfs.
+import std.os;
+import std.fs;
+import text;
+
+pub fn is_termux() bool {
+    if (!os.env("TERMUX_VERSION", "").is_empty()) { ret true; }
+    const prefix = os.env("PREFIX", "");
+    prefix.as_str().contains("com.termux")
+}
+
+pub fn is_android() bool {
+    if (is_termux()) { ret true; }
+    if (!os.env("ANDROID_ROOT", "").is_empty()) { ret true; }
+    fs.exists("/system/build.prop")
+}
+
+fn property(name: str) String {
+    const source = os.env("QUAZIFETCH_ANDROID_BUILD_PROP", "/system/build.prop");
+    const key = text.join(name, "=");
+    text.file_field(source.as_str(), key.as_str())
+}
+
+pub fn os_name() String {
+    if (!is_android()) { ret String.new(); }
+    var output = String.from("Android");
+    const release = property("ro.build.version.release");
+    if (!release.is_empty()) {
+        output = output.push_str(" ");
+        output = output.push_str(release.as_str());
+    }
+    if (is_termux()) { output = output.push_str(" (Termux)"); }
+    output
+}
+
+pub fn model() String {
+    if (!is_android()) { ret String.new(); }
+    var value = property("ro.product.model");
+    if (value.is_empty()) { value = property("ro.product.vendor.model"); }
+    if (value.is_empty()) { value = property("ro.product.system.model"); }
+    value
+}
+
+// KGSL is not exposed on every Android device.
+pub fn gpu_name() String {
+    if (!is_android()) { ret String.new(); }
+    const source = os.env("QUAZIFETCH_ANDROID_GPU_SYSFS", "/sys/class/kgsl/kgsl-3d0/gpu_model");
+    text.file(source.as_str())
+}
+
+// The framebuffer size does not describe the physical panel.
+pub fn framebuffer() String {
+    if (!is_android()) { ret String.new(); }
+    const source = os.env("QUAZIFETCH_ANDROID_FB_SYSFS", "/sys/class/graphics/fb0/virtual_size");
+    const dimensions = text.file(source.as_str());
+    if (dimensions.is_empty()) { ret String.new(); }
+    const comma = dimensions.find(",");
+    if (comma.is_none()) { ret String.new(); }
+    const split = comma.unwrap();
+    const w = text.byte_slice(dimensions.as_str(), 0, split);
+    const h = text.byte_slice(dimensions.as_str(), split + 1, dimensions.bytes_len());
+    const width = w.as_str().parse[u64]();
+    const height = h.as_str().parse[u64]();
+    if (width.is_err() || height.is_err()) { ret String.new(); }
+    const x = width.unwrap();
+    const y = height.unwrap();
+    if (x < 1 || y < 1 || x > 16384 || y > 16384) {
+        ret String.new();
+    }
+    var result = x.to_string();
+    result = result.push_str("x");
+    const second = y.to_string();
+    result = result.push_str(second.as_str());
+    result.push_str(" [Framebuffer]")
+}

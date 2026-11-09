@@ -1,0 +1,90 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Read filesystem usage through Linux statfs.
+import std.core;
+import text;
+import std.os;
+import android;
+
+@syscall("statfs")
+unsafe fn linux_statfs(path: str, output: *u8) i32;
+
+unsafe fn word64(raw: *u8, offset: usize) u64 {
+    *((raw + offset) as *u64)
+}
+
+fn root_fs() String {
+    const data: String = text.file("/proc/mounts");
+    const length: usize = core.strlen(data.as_str());
+    var from: usize = 0;
+    var i: usize = 0;
+    for (i <= length) {
+        if (i == length || core.str_byte_at(data.as_str(), i) == 10) {
+            const row: String = text.byte_slice(data.as_str(), from, i);
+            const text_value: str = row.as_str();
+            const end: usize = core.strlen(text_value);
+            var first: usize = 0;
+            for (first < end && core.str_byte_at(text_value, first) != 32) { first++; }
+            var second: usize = first + 1;
+            for (second < end && core.str_byte_at(text_value, second) != 32) { second++; }
+            if (second == first + 2 && core.str_byte_at(text_value, first + 1) == 47) {
+                var third: usize = second + 1;
+                for (third < end && core.str_byte_at(text_value, third) != 32) { third++; }
+                if (third > second + 1) {
+                    ret text.byte_slice(text_value, second + 1, third);
+                }
+            }
+            from = i + 1;
+        }
+        i++;
+    }
+    String.new()
+}
+
+pub fn label() String {
+    if (android.is_termux() && !os.env("HOME", "").is_empty()) {
+        ret String.from("Disk (Home)");
+    }
+    String.from("Disk (/)")
+}
+
+pub fn root_usage() String {
+    @cfg(target_os = "linux") {
+        var target: String = String.from("/");
+        if (android.is_termux()) {
+            const home = os.env("HOME", "");
+            if (!home.is_empty()) { target = home; }
+        }
+        var buffer: *u8 = 0;
+        unsafe { buffer = core.malloc(128); }
+        if (buffer == 0) { ret String.new(); }
+        var ok: i32 = -1;
+        unsafe { ok = linux_statfs(target.as_str(), buffer); }
+        var blocksize: u64 = 0;
+        var blocks: u64 = 0;
+        var free: u64 = 0;
+        if (ok == 0) {
+            unsafe {
+                blocksize = word64(buffer, 8);
+                blocks = word64(buffer, 16);
+                free = word64(buffer, 24);
+            }
+        }
+        unsafe { core.free(buffer); }
+        if (ok != 0 || blocksize == 0 || blocks == 0 || free > blocks) { ret String.new(); }
+        // Reject counters that would overflow the size calculation.
+        if (blocks > 18446744073709551615 / blocksize) { ret String.new(); }
+        const total: u64 = blocks * blocksize;
+        const used: u64 = (blocks - free) * blocksize;
+        var result: String = text.utilization(used, total);
+        var filesystem = String.new();
+        if (target.as_str() == "/") { filesystem = root_fs(); }
+        if (!filesystem.is_empty()) {
+            result = result.push_str(" - ");
+            result = result.push_str(filesystem.as_str());
+        }
+        ret result;
+    }
+    String.new()
+}

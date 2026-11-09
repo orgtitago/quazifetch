@@ -1,0 +1,64 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import providers.identity;
+import providers.system_info;
+import providers.hardware;
+import providers.session;
+import providers.packages;
+
+pub fn lookup(key: str) String {
+    var result: String = identity.lookup(key);
+    if (!result.is_empty()) { ret result; }
+    result = system_info.lookup(key);
+    if (!result.is_empty()) { ret result; }
+    result = hardware.lookup(key);
+    if (!result.is_empty()) { ret result; }
+    result = session.lookup(key);
+    if (!result.is_empty()) { ret result; }
+    packages.lookup(key)
+}
+
+pub fn names() Array[str] {
+    var names: Array[str] = Array.new();
+    names.push("blank");
+    names.push("header");
+    names.push("separator");
+    names.push("username");
+    names.push("hostname");
+    names.push("os");
+    names.push("os_name");
+    names.push("kernel");
+    names.push("arch");
+    names.push("cpu");
+    names.push("gpu");
+    names.push("ram");
+    names.push("disk");
+    names.push("disk_label");
+    names.push("swap");
+    names.push("battery");
+    names.push("battery_label");
+    names.push("cpu_threads");
+    names.push("gpu_driver");
+    names.push("distro");
+    names.push("timezone");
+    names.push("shell");
+    names.push("terminal");
+    names.push("de");
+    names.push("wm");
+    names.push("init");
+    names.push("session");
+    names.push("display");
+    names.push("display_label");
+    names.push("packages");
+    names.push("uptime");
+    names.push("machine");
+    names.push("board");
+    names.push("vendor");
+    names.push("firmware");
+    names.push("locale");
+    names.push("home");
+    names.push("editor");
+    names.push("pid");
+    names
+}

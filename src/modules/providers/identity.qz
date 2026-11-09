@@ -1,0 +1,28 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+import android;
+
+pub fn lookup(key: str) String {
+    if (key == "username") {
+        @cfg(target_os = "windows") { ret text.first_env("USERNAME", "USER"); }
+        const name = text.first_env("USER", "LOGNAME");
+        if (!name.is_empty()) { ret name; }
+        if (android.is_termux()) {
+            const uid = os.getuid();
+            if (uid != 4294967295 as u32) {
+                const number = uid.to_string();
+                ret text.join("uid", number.as_str());
+            }
+        }
+        ret String.new();
+    }
+    if (key == "hostname") { ret os.hostname(); }
+    if (key == "home") { ret text.first_env("HOME", "USERPROFILE"); }
+    if (key == "locale") { ret text.first_env("LC_ALL", "LANG"); }
+    if (key == "editor") { ret text.first_env("VISUAL", "EDITOR"); }
+    if (key == "pid") { ret os.getpid().to_string(); }
+    String.new()
+}

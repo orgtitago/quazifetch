@@ -1,0 +1,226 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Connector status and EDID describe the panel, not the Wayland socket.
+import std.core;
+import std.fs;
+import std.os;
+import text;
+import dir_entries;
+import display_live;
+import android;
+
+pub struct Monitor {
+    name: String,
+    width: u64,
+    height: u64,
+    hz: u64,
+    diagonal: u64,
+}
+
+fn blank() Monitor {
+    Monitor { name: String.new(), width: 0, height: 0, hz: 0, diagonal: 0 }
+}
+
+unsafe fn read_byte(raw: *u8, index: usize) u64 {
+    var n: u8 = 0;
+    unsafe { n = *(raw + index); }
+    n as u64
+}
+
+fn hex_digit(n: u64) String {
+    text.byte_slice("0123456789ABCDEF", n as usize, (n + 1) as usize)
+}
+
+unsafe fn edid_code(raw: *u8) String {
+    const manufacturer: u64 = (read_byte(raw, 8) << 8) | read_byte(raw, 9);
+    const alphabet: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const a: u64 = (manufacturer >> 10) & 31;
+    const b: u64 = (manufacturer >> 5) & 31;
+    const c: u64 = manufacturer & 31;
+    if (a < 1 || a > 26 || b < 1 || b > 26 || c < 1 || c > 26) { ret String.new(); }
+    var code: String = text.byte_slice(alphabet, (a - 1) as usize, a as usize);
+    const second: String = text.byte_slice(alphabet, (b - 1) as usize, b as usize);
+    const third: String = text.byte_slice(alphabet, (c - 1) as usize, c as usize);
+    code = code.push_str(second.as_str());
+    code = code.push_str(third.as_str());
+    const product: u64 = read_byte(raw, 10) | (read_byte(raw, 11) << 8);
+    const d0 = hex_digit((product >> 12) & 15);
+    const d1 = hex_digit((product >> 8) & 15);
+    const d2 = hex_digit((product >> 4) & 15);
+    const d3 = hex_digit(product & 15);
+    code = code.push_str(d0.as_str());
+    code = code.push_str(d1.as_str());
+    code = code.push_str(d2.as_str());
+    code.push_str(d3.as_str())
+}
+
+fn integer_sqrt(n: u64) u64 {
+    if (n == 0) { ret 0; }
+    var x: u64 = n;
+    var y: u64 = (x + 1) / 2;
+    for (y < x) { x = y; y = (x + n / x) / 2; }
+    x
+}
+
+fn edid(path: str) Monitor {
+    var result = blank();
+    const opened = fs.File.open(path);
+    if (opened.is_err()) { ret result; }
+    var file = opened.unwrap();
+    var data: *u8 = 0;
+    unsafe { data = core.malloc(128); }
+    if (data == 0) { ret result; }
+    var length: usize = 0;
+    for (length < 128) {
+        var n: isize = -1;
+        unsafe { n = file.read(data + length, 128 - length); }
+        if (n <= 0) { break; }
+        length += n as usize;
+    }
+    unsafe { if (length == 128 && read_byte(data, 0) == 0 && read_byte(data, 1) == 255 &&
+        read_byte(data, 2) == 255 && read_byte(data, 3) == 255 &&
+        read_byte(data, 4) == 255 && read_byte(data, 5) == 255 &&
+        read_byte(data, 6) == 255 && read_byte(data, 7) == 0) {
+        var sum: u64 = 0;
+        var i: usize = 0;
+        for (i < 128) { sum += read_byte(data, i); i++; }
+        if ((sum & 255) == 0) {
+            result.name = edid_code(data);
+            const clock: u64 = read_byte(data, 54) | (read_byte(data, 55) << 8);
+            const hactive: u64 = read_byte(data, 56) | ((read_byte(data, 58) & 240) << 4);
+            const hblank: u64 = read_byte(data, 57) | ((read_byte(data, 58) & 15) << 8);
+            const vactive: u64 = read_byte(data, 59) | ((read_byte(data, 61) & 240) << 4);
+            const vblank: u64 = read_byte(data, 60) | ((read_byte(data, 61) & 15) << 8);
+            if (clock > 0 && hactive > 0 && vactive > 0 && hblank > 0 && vblank > 0) {
+                result.width = hactive;
+                result.height = vactive;
+                const total: u64 = (hactive + hblank) * (vactive + vblank);
+                result.hz = (clock * 10000 + total / 2) / total;
+            }
+            var width_mm: u64 = read_byte(data, 66) | ((read_byte(data, 68) & 240) << 4);
+            var height_mm: u64 = read_byte(data, 67) | ((read_byte(data, 68) & 15) << 8);
+            if (width_mm == 0 || height_mm == 0) {
+                width_mm = read_byte(data, 21) * 10;
+                height_mm = read_byte(data, 22) * 10;
+            }
+            if (width_mm > 0 && height_mm > 0) {
+                const mm: u64 = integer_sqrt(width_mm * width_mm + height_mm * height_mm);
+                result.diagonal = (mm * 10 + 127) / 254;
+            }
+        }
+    }
+    }
+    unsafe { core.free(data); }
+    result
+}
+
+fn connector() String {
+    @cfg(target_os = "linux") {
+        const root: String = os.env("QUAZIFETCH_DRM_ROOT", "/sys/class/drm");
+        var entries = dir_entries.names(String.from(root.as_str()));
+        var external: String = String.new();
+        for (!entries.is_empty()) {
+            const entry: String = entries.remove(0);
+            const name: str = entry.as_str();
+            if (!name.starts_with("card") || !name.contains("-")) { continue; }
+            const root_slash: String = text.join(root.as_str(), "/");
+            const path: String = text.join(root_slash.as_str(), name);
+            const status: String = text.file(text.join(path.as_str(), "/status").as_str());
+            if (status.as_str() != "connected") { continue; }
+            if (name.contains("-eDP-") || name.contains("-LVDS-") || name.contains("-DSI-")) {
+                ret path;
+            }
+            if (external.is_empty()) { external = path; }
+        }
+        ret external;
+    }
+    String.new()
+}
+
+fn monitor_path(path: str) Monitor {
+    if (path.is_empty()) { ret blank(); }
+    const edid_path = text.join(path.as_str(), "/edid");
+    var info = edid(edid_path.as_str());
+    if (info.width == 0 || info.height == 0) {
+        const modes = text.file(text.join(path.as_str(), "/modes").as_str());
+        const newline = modes.find("\n");
+        var preferred = String.from(modes.as_str());
+        if (newline.is_some()) { preferred = text.byte_slice(modes.as_str(), 0, newline.unwrap()); }
+        const x = preferred.find("x");
+        if (x.is_some()) {
+            const separator: usize = x.unwrap();
+            const a = text.byte_slice(preferred.as_str(), 0, separator);
+            const b = text.byte_slice(preferred.as_str(), separator + 1, preferred.bytes_len());
+            const w = a.as_str().parse[u64]();
+            const h = b.as_str().parse[u64]();
+            if (w.is_ok() && h.is_ok()) {
+                info.width = w.unwrap();
+                info.height = h.unwrap();
+            }
+        }
+    }
+    if (info.name.is_empty()) {
+        const n = text.basename(path.as_str());
+        const dash = n.find("-");
+        if (dash.is_some()) { info.name = text.byte_slice(n.as_str(), dash.unwrap() + 1, n.bytes_len()); }
+    }
+    info
+}
+
+pub fn label() String {
+    const connector_path = connector();
+    const current = monitor_path(connector_path.as_str());
+    if (current.name.is_empty()) {
+        if (!android.framebuffer().is_empty()) { ret String.from("Display (Framebuffer)"); }
+        ret String.from("Display");
+    }
+    var result: String = String.from("Display (");
+    result = result.push_str(current.name.as_str());
+    result.push_str(")")
+}
+
+pub fn value() String {
+    const connector_path = connector();
+    var current = monitor_path(connector_path.as_str());
+    if (current.width == 0 || current.height == 0) { ret android.framebuffer(); }
+    const connector_basename = text.basename(connector_path.as_str());
+    const dash = connector_basename.find("-");
+    var active = display_live.missing();
+    if (dash.is_some()) {
+        const connector_name = text.byte_slice(connector_basename.as_str(), dash.unwrap() + 1, connector_basename.bytes_len());
+        active = display_live.monitor(connector_name.as_str());
+    }
+    if (active.width > 0 && active.height > 0) {
+        current.width = active.width;
+        current.height = active.height;
+    }
+    if (active.hz > 0) { current.hz = active.hz; }
+    const width = current.width.to_string();
+    const height = current.height.to_string();
+    var value: String = String.from(width.as_str());
+    value = value.push_str("x");
+    value = value.push_str(height.as_str());
+    if (!active.scale.is_empty()) {
+        value = value.push_str(" @ ");
+        value = value.push_str(active.scale.as_str());
+        value = value.push_str("x");
+    }
+    if (current.diagonal > 0) {
+        const diagonal = current.diagonal.to_string();
+        value = value.push_str(" in ");
+        value = value.push_str(diagonal.as_str());
+        value = value.push_str("\"");
+    }
+    if (current.hz > 0) {
+        const refresh = current.hz.to_string();
+        value = value.push_str(", ");
+        value = value.push_str(refresh.as_str());
+        value = value.push_str(" Hz");
+    }
+    // eDP, LVDS and DSI are internal connector types.
+    if (connector_path.contains("-eDP-") || connector_path.contains("-LVDS-") || connector_path.contains("-DSI-")) {
+        value = value.push_str(" [Built-in]");
+    }
+    value
+}

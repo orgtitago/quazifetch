@@ -1,0 +1,263 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Nix counts use the store closure, not the profile manifest.
+import std.core;
+import std.os;
+import std.fs;
+import text;
+import dir_entries;
+import commands;
+import nix_cache;
+import android;
+
+fn source_file(path: str) String {
+    const read = fs.read_to_string_with_limit(path, 16777216);
+    if (read.is_err()) { ret String.new(); }
+    read.unwrap()
+}
+
+fn amount(count: usize, source: str) String {
+    if (count == 0) { ret String.new(); }
+    var part: String = count.to_string();
+    part = part.push_str(" (");
+    part = part.push_str(source);
+    part.push_str(")")
+}
+
+fn add(output: String, count: usize, source: str) String {
+    if (count == 0) { ret output; }
+    var result: String = output;
+    if (!result.is_empty()) { result = result.push_str(", "); }
+    const part: String = amount(count, source);
+    result.push_str(part.as_str())
+}
+
+fn rooted(path: str) String {
+    const root: String = os.env("QUAZIFETCH_PKG_ROOT", "");
+    if (root.is_empty()) { ret String.from(path); }
+    text.join(root.as_str(), path)
+}
+
+fn count(path: str) usize { text.count_directory(rooted(path).as_str()) }
+
+// Fall back to a profile manifest if nix-store is unavailable.
+fn actual_path(path: str) String {
+    const root = os.env("QUAZIFETCH_PKG_ROOT", "");
+    const home = os.env("HOME", "");
+    if (!root.is_empty() && !home.is_empty() && path.starts_with(home.as_str())) {
+        ret String.from(path);
+    }
+    rooted(path)
+}
+
+fn manifest(path: str) usize {
+    const name: String = actual_path(path);
+    const json: String = source_file(text.join(name.as_str(), "/manifest.json").as_str());
+    if (!json.is_empty()) { ret text.count_occurrences(json.as_str(), "\"storePaths\""); }
+    const legacy: String = source_file(text.join(name.as_str(), "/manifest.nix").as_str());
+    if (!legacy.is_empty()) { ret text.count_occurrences(legacy.as_str(), "outPath ="); }
+    0
+}
+
+// Scan by bytes: slicing Quazi strings by rune would rescan the input.
+fn std_byte(data: str, at: usize) u8 { core.str_byte_at(data, at) }
+
+fn range_matches(data: str, from: usize, until: usize, pattern: str) bool {
+    const n: usize = pattern.bytes_len();
+    if (until - from != n) { ret false; }
+    var i: usize = 0;
+    for (i < n) {
+        if (std_byte(data, from + i) != std_byte(pattern, i)) { ret false; }
+        i++;
+    }
+    true
+}
+
+fn range_starts(data: str, from: usize, until: usize, prefix: str) bool {
+    const n: usize = prefix.bytes_len();
+    if (until - from < n) { ret false; }
+    range_matches(data, from, from + n, prefix)
+}
+
+fn range_ends(data: str, from: usize, until: usize, suffix: str) bool {
+    const n: usize = suffix.bytes_len();
+    if (until - from < n) { ret false; }
+    range_matches(data, until - n, until, suffix)
+}
+
+// Count only paths that name a versioned package.
+fn nix_qualified_range(data: str, from: usize, until: usize) bool {
+    if (!range_starts(data, from, until, "/nix/store/")) { ret false; }
+    // /nix/store/<32char-hash>-<name>
+    const basename: usize = from + 11;
+    if (until < basename + 34 || std_byte(data, basename + 32) != 45) { ret false; }
+    const name: usize = basename + 33;
+    if (range_starts(data, name, until, "nixos-system-nixos-") ||
+        range_ends(data, name, until, "-doc") ||
+        range_ends(data, name, until, "-man") ||
+        range_ends(data, name, until, "-info") ||
+        range_ends(data, name, until, "-dev") ||
+        range_ends(data, name, until, "-bin")) { ret false; }
+    var i: usize = name;
+    for (i + 2 < until) {
+        const a = std_byte(data, i);
+        const b = std_byte(data, i + 1);
+        const c = std_byte(data, i + 2);
+        if (a >= 48 && a <= 57 && b == 46 && c >= 48 && c <= 57) { ret true; }
+        i++;
+    }
+    false
+}
+
+// Both Nix profiles share one deadline, even if the daemon stalls.
+fn remaining_ms(started: u64, total_ms: u64) u64 {
+    if (started == 0) { ret 0; }
+    const now: u64 = commands.monotonic_ms();
+    if (now == 0 || now - started >= total_ms) { ret 0; }
+    total_ms - (now - started)
+}
+
+fn nix_closure(path: str, budget_ms: u64, role: str) usize {
+    const profile: String = actual_path(path);
+    if (!fs.exists(profile.as_str())) {
+        if (path == "/run/current-system") { ret manifest("/run/current-system/sw"); }
+        ret 0;
+    }
+    const pkg_root = os.env("QUAZIFETCH_PKG_ROOT", "");
+    if (!pkg_root.is_empty()) {
+        var total: usize = manifest(path);
+        if (total == 0 && path == "/run/current-system") {
+            total = manifest("/run/current-system/sw");
+        }
+        ret total;
+    }
+    const cached = nix_cache.load(role, profile.as_str());
+    if (cached > 0) { ret cached; }
+    if (budget_ms == 0) { ret manifest(path); }
+    const output = commands.capture_timeout("nix-store", "--query", "--requisites", path, budget_ms);
+    if (output.is_empty()) { ret manifest(path); }
+    var total: usize = 0;
+    var from: usize = 0;
+    var i: usize = 0;
+    const length: usize = output.bytes_len();
+    for (i <= length) {
+        if (i == length || std_byte(output.as_str(), i) == 10) {
+            if (i > from && nix_qualified_range(output.as_str(), from, i)) { total++; }
+            from = i + 1;
+        }
+        i++;
+    }
+    nix_cache.save(role, profile.as_str(), total);
+    total
+}
+
+fn flatpak_apps(root: str) usize {
+    const path = text.join(root, "/app");
+    var entries = dir_entries.names(String.from(path.as_str()));
+    var count: usize = 0;
+    for (!entries.is_empty()) {
+        const last = entries.len() - 1;
+        const app = entries.remove(last);
+        if (app.starts_with(".")) { continue; }
+        const installed = text.join(text.join(path.as_str(), "/").as_str(), app.as_str());
+        if (fs.exists(text.join(installed.as_str(), "/current").as_str())) { count++; }
+    }
+    count
+}
+
+fn flatpak_runtime(root: str) usize {
+    const path = text.join(root, "/runtime");
+    var entries = dir_entries.names(String.from(path.as_str()));
+    var count: usize = 0;
+    for (!entries.is_empty()) {
+        const last = entries.len() - 1;
+        const runtime = entries.remove(last);
+        if (runtime.starts_with(".") || runtime.ends_with(".Locale") || runtime.ends_with(".Debug")) { continue; }
+        const base = text.join(text.join(path.as_str(), "/").as_str(), runtime.as_str());
+        var archs = dir_entries.names(String.from(base.as_str()));
+        for (!archs.is_empty()) {
+            const last_arch = archs.len() - 1;
+            const arch = archs.remove(last_arch);
+            if (arch.starts_with(".")) { continue; }
+            const arch_path = text.join(text.join(base.as_str(), "/").as_str(), arch.as_str());
+            count += text.count_directory(arch_path.as_str());
+        }
+    }
+    count
+}
+
+fn flatpak(root: str) usize { flatpak_apps(root) + flatpak_runtime(root) }
+
+fn linux_packages() String {
+    var result: String = String.new();
+    // Termux keeps its dpkg database under $PREFIX.
+    if (android.is_termux()) {
+        const prefix = os.env("PREFIX", "");
+        if (!prefix.is_empty()) {
+            const status = source_file(text.join(prefix.as_str(), "/var/lib/dpkg/status").as_str());
+            if (!status.is_empty()) {
+                result = add(result, text.count_lines(status.as_str(), "Status: install ok installed"), "termux");
+            }
+        }
+        ret result;
+    }
+    const home: String = os.env("HOME", "");
+    var flatpak_count: usize = flatpak(rooted("/var/lib/flatpak").as_str());
+    if (!home.is_empty()) {
+        flatpak_count += flatpak(text.join(home.as_str(), "/.local/share/flatpak").as_str());
+    }
+    result = add(result, flatpak_count, "flatpak");
+    const clock: u64 = commands.monotonic_ms();
+    const budget: u64 = 3500;
+    const system_profile = os.env("QUAZIFETCH_NIX_SYSTEM_PROFILE", "/run/current-system");
+    result = add(result, nix_closure(system_profile.as_str(), remaining_ms(clock, budget), "system"), "nix-system");
+    var user: usize = 0;
+    if (!home.is_empty()) {
+        user += nix_closure(text.join(home.as_str(), "/.nix-profile").as_str(), remaining_ms(clock, budget), "user-home");
+        const state: String = os.env("XDG_STATE_HOME", text.join(home.as_str(), "/.local/state").as_str());
+        user += nix_closure(text.join(state.as_str(), "/nix/profile").as_str(), remaining_ms(clock, budget), "user-state");
+    }
+    const username: String = os.env("USER", "");
+    if (!username.is_empty()) {
+        user += nix_closure(text.join("/etc/profiles/per-user/", username.as_str()).as_str(), remaining_ms(clock, budget), "user-system");
+    }
+    result = add(result, user, "nix-user");
+    result = add(result, nix_closure("/nix/var/nix/profiles/default", remaining_ms(clock, budget), "default"), "nix-default");
+    const dpkg: String = source_file(rooted("/var/lib/dpkg/status").as_str());
+    if (!dpkg.is_empty()) { result = add(result, text.count_lines(dpkg.as_str(), "Status: install ok installed"), "dpkg"); }
+    result = add(result, count("/var/lib/pacman/local"), "pacman");
+    const apk: String = text.file(rooted("/lib/apk/db/installed").as_str());
+    if (!apk.is_empty()) { result = add(result, text.count_lines(apk.as_str(), "P:"), "apk"); }
+    result
+}
+
+fn netbsd_packages() String {
+    const custom: String = os.env("PKG_DBDIR", "");
+    if (!custom.is_empty()) {
+        const n: usize = text.count_directory(custom.as_str());
+        if (n > 0) { ret amount(n, "pkgsrc"); }
+    }
+    var n: usize = count("/usr/pkg/pkgdb");
+    if (n == 0) { n = count("/var/db/pkg"); }
+    amount(n, "pkgsrc")
+}
+
+fn windows_packages() String {
+    var output: String = String.new();
+    const chocolatey: String = os.env("ChocolateyInstall", "C:\\ProgramData\\chocolatey");
+    output = add(output, text.count_directory(text.join(chocolatey.as_str(), "\\lib").as_str()), "choco");
+    const scoop: String = os.env("SCOOP", "");
+    if (!scoop.is_empty()) { output = add(output, text.count_directory(text.join(scoop.as_str(), "\\apps").as_str()), "scoop"); }
+    const local: String = os.env("LOCALAPPDATA", "");
+    if (!local.is_empty()) { output = add(output, text.count_directory(text.join(local.as_str(), "\\Microsoft\\WinGet\\Packages").as_str()), "winget"); }
+    output
+}
+
+pub fn lookup(key: str) String {
+    if (key != "packages") { ret String.new(); }
+    @cfg(target_os = "linux") { ret linux_packages(); }
+    @cfg(target_os = "netbsd") { ret netbsd_packages(); }
+    @cfg(target_os = "windows") { ret windows_packages(); }
+    String.new()
+}

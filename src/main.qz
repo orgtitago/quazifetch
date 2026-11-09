@@ -1,0 +1,63 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.io;
+import std.os;
+import modules.template;
+import std.time;
+
+fn usage() void {
+    io.println("quazifetch — modular system information, written in Quazi");
+    io.println("Usage: quazifetch [--no-color] [--all] [--list] [--timings] [--help]");
+    io.println("Choose module IDs and label color in src/config.qz; rebuild to apply.");
+}
+
+fn elapsed_ms(before: time.Instant) u64 {
+    const result = before.elapsed();
+    if (result.is_err()) { ret 0; }
+    const duration = result.unwrap();
+    duration.seconds() * 1000 + (duration.subsec_nanoseconds() as u64) / 1000000
+}
+
+fn main(args: Array[str]) i32 {
+    var no_color: bool = !os.env("NO_COLOR", "").is_empty();
+    var show_missing: bool = false;
+    var timings: bool = false;
+    var i: usize = 1;
+    for (i < args.len()) {
+        const arg: str = args[i];
+        if (arg == "--help" || arg == "-h") { usage(); ret 0; }
+        if (arg == "--list") {
+            const names = template.names();
+            var j: usize = 0;
+            for (j < names.len()) { io.println("{}", names[j]); j++; }
+            ret 0;
+        }
+        if (arg == "--all") { show_missing = true; }
+        else if (arg == "--no-color") { no_color = true; }
+        else if (arg == "--timings") { timings = true; }
+        else {
+            io.println("Unknown option: {}", arg);
+            usage();
+            ret 2;
+        }
+        i++;
+    }
+    const started = time.Instant.now();
+    const lines = template.layout();
+    var j: usize = 0;
+    for (j < lines.len()) {
+        const before = time.Instant.now();
+        const item = template.render(lines[j], !no_color, show_missing);
+        if (item.available || show_missing) { io.println("{}", item.text.as_str()); }
+        if (timings && before.is_ok()) {
+            const ms = elapsed_ms(before.unwrap());
+            io.errln("[timing] {} ms: {}", ms, item.text.as_str());
+        }
+        j++;
+    }
+    if (timings && started.is_ok()) {
+        io.errln("[total] {} ms", elapsed_ms(started.unwrap()));
+    }
+    0
+}

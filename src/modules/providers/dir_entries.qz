@@ -1,0 +1,51 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// std.fs can count directory entries, but it cannot list their names.
+import std.core;
+import std.unix;
+
+pub fn names(path: String) Array[String] {
+    var entries: Array[String] = Array.new();
+    @cfg(target_os = "linux") {
+        var fd: i32 = -1;
+        unsafe { fd = unix.open(path.as_str(), 65536, 0); } // O_DIRECTORY | O_RDONLY
+        if (fd < 0) { ret entries; }
+        const capacity: usize = 4096;
+        var buffer: *u8 = 0;
+        unsafe { buffer = core.malloc(capacity); }
+        if (buffer == 0) { unsafe { unix.close(fd); } ret entries; }
+        for (true) {
+            var amount: isize = -1;
+            unsafe { amount = unix.getdents64(fd, buffer, capacity); }
+            if (amount <= 0) { break; }
+            var offset: usize = 0;
+            for (offset < amount as usize) {
+                var record: usize = 0;
+                unsafe {
+                    record = (*(buffer + offset + 16)) as usize;
+                    record += ((*(buffer + offset + 17)) as usize) << 8;
+                }
+                if (record < 20 || offset + record > amount as usize) { break; }
+                var length: usize = 0;
+                for (length + 19 < record) {
+                    var c: u8 = 0;
+                    unsafe { c = *(buffer + offset + 19 + length); }
+                    if (c == 0) { break; }
+                    length++;
+                }
+                if (length > 0 && length + 19 < record) {
+                    var name: String = String.new();
+                    unsafe { name = String.from(core.str_from_ptr(buffer + offset + 19)); }
+                    if (name.as_str() != "." && name.as_str() != "..") {
+                        entries.push(name);
+                    }
+                }
+                offset += record;
+            }
+        }
+        unsafe { core.free(buffer); }
+        unsafe { unix.close(fd); }
+    }
+    entries
+}
