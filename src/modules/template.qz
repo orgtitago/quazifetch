@@ -22,6 +22,21 @@ fn header() String {
     result.push_str(hostname.as_str())
 }
 
+fn styled_header(use_color: bool) String {
+    const plain = header();
+    if (!use_color) { ret plain; }
+    const user = registry.lookup("username");
+    const host = registry.lookup("hostname");
+    if (user.is_empty() || host.is_empty()) { ret accent(plain.as_str(), true); }
+    var result = String.from(config.label_color());
+    result = result.push_str(user.as_str());
+    result = result.push_str(config.value_color());
+    result = result.push_str("@");
+    result = result.push_str(config.label_color());
+    result = result.push_str(host.as_str());
+    result.push_str("\e[0m")
+}
+
 fn accent(value: str, use_color: bool) String {
     if (!use_color) { ret String.from(value); }
     var result = String.from(config.label_color());
@@ -77,15 +92,21 @@ pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
     if (key == "header") {
         const name = header();
         if (name.is_empty()) { ret Rendered { text: String.new(), available: false }; }
-        ret Rendered { text: accent(name.as_str(), use_color), available: true };
+        ret Rendered { text: styled_header(use_color), available: true };
     }
     if (key == "separator") {
         const name = header();
         if (name.is_empty()) { ret Rendered { text: String.new(), available: false }; }
         var underline = String.new();
         var i: usize = 0;
-        for (i < name.bytes_len()) { underline = underline.push_str("-"); i++; }
-        ret Rendered { text: accent(underline.as_str(), use_color), available: true };
+        for (i < name.bytes_len() + 2) { underline = underline.push_str("-"); i++; }
+        if (use_color) {
+            var styled = String.from(config.value_color());
+            styled = styled.push_str(underline.as_str());
+            styled = styled.push_str("\e[0m");
+            ret Rendered { text: styled, available: true };
+        }
+        ret Rendered { text: underline, available: true };
     }
     var value = registry.lookup(key);
     if (key == "os" && !value.is_empty()) {

@@ -192,3 +192,68 @@ pub fn count_occurrences(data: str, needle: str) usize {
     }
     count
 }
+
+pub fn first_line(input: str) String {
+    const pos = input.find("\n");
+    if (pos.is_some()) { ret text.byte_slice(input, 0, pos.unwrap()).trim(); }
+    String.from(input).trim()
+}
+
+
+pub fn word(raw: str, wanted: usize) String {
+    const length: usize = core.strlen(raw);
+    var start: usize = 0;
+    var inside: bool = false;
+    var index: usize = 0;
+    var i: usize = 0;
+    for (i <= length) {
+        var space: bool = i == length;
+        if (i < length) {
+            const c = core.str_byte_at(raw, i);
+            space = c == 32 || c == 9 || c == 10 || c == 13;
+        }
+        if (space) {
+            if (inside) {
+                if (index == wanted) { ret text.byte_slice(raw, start, i); }
+                index++;
+                inside = false;
+            }
+        } else if (!inside) {
+            start = i;
+            inside = true;
+        }
+        i++;
+    }
+    String.new()
+}
+
+
+pub fn contains_range(raw: str, start: usize, end: usize, needle: str) bool {
+    const wanted = core.strlen(needle);
+    if (wanted == 0 || wanted > end - start) { ret false; }
+    var i = start;
+    for (i + wanted <= end) {
+        var matches = true;
+        var j: usize = 0;
+        for (j < wanted) {
+            if (core.str_byte_at(raw, i + j) != core.str_byte_at(needle, j)) {
+                matches = false;
+                break;
+            }
+            j++;
+        }
+        if (matches) { ret true; }
+        i++;
+    }
+    false
+}
+
+
+@cfg(target_os = "netbsd")
+pub fn boot_log() String {
+    const current = text.file("/var/run/dmesg.boot");
+    if (!current.is_empty()) { ret current; }
+    const previous = text.file("/var/run/dmesg.out");
+    if (!previous.is_empty()) { ret previous; }
+    text.file("/kern/msgbuf")
+}

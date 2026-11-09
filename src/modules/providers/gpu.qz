@@ -123,6 +123,7 @@ fn udev_name(card: str) String {
 }
 
 pub fn name() String {
+    @cfg(target_os = "netbsd") { ret netbsd_gpu_from(text.boot_log().as_str()); }
     @cfg(target_os = "linux") {
         const card: String = pci_card();
         if (card.is_empty()) { ret android.gpu_name(); }
@@ -150,6 +151,35 @@ pub fn driver() String {
         if (card.is_empty()) { ret String.new(); }
         const uevent: String = text.join(card.as_str(), "/device/uevent");
         ret text.file_field(uevent.as_str(), "DRIVER=");
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_gpu_from(raw: str) String {
+    const length = core.strlen(raw);
+    var start: usize = 0;
+    var i: usize = 0;
+    for (i <= length) {
+        if (i == length || core.str_byte_at(raw, i) == 10) {
+            if (text.contains_range(raw, start, i, " at pci") &&
+                (text.contains_range(raw, start, i, "i915drmkms") ||
+                 text.contains_range(raw, start, i, "amdgpu") ||
+                 text.contains_range(raw, start, i, "radeon") ||
+                 text.contains_range(raw, start, i, "nouveau") ||
+                 text.contains_range(raw, start, i, "vga0 at pci"))) {
+                const line = text.byte_slice(raw, start, i);
+                const colon = line.find(": ");
+                if (colon.is_some()) {
+                    const description = text.byte_slice(line.as_str(), colon.unwrap() + 2, line.bytes_len());
+                    const rev = description.find(" (rev.");
+                    if (rev.is_some()) { ret text.byte_slice(description.as_str(), 0, rev.unwrap()); }
+                    ret description;
+                }
+            }
+            start = i + 1;
+        }
+        i++;
     }
     String.new()
 }

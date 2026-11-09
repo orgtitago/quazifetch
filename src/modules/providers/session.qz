@@ -23,7 +23,8 @@ fn is_standalone_wm(name: str) bool {
         name == "river" || name == "niri" || name == "labwc" ||
         name == "dwm" || name == "i3" || name == "bspwm" ||
         name == "awesome" || name == "openbox" || name == "qtile" ||
-        name == "weston" || name == "cwm"
+        name == "weston" || name == "cwm" || name == "ctwm" ||
+        name == "vxwm" || name == "fvwm" || name == "twm" || name == "jwm"
 }
 
 fn compose(name: str, version: str, with_protocol: bool) String {
@@ -48,6 +49,9 @@ fn terminal_name() String {
     if (android.is_termux()) { ret String.from("Termux"); }
     const program = os.env("TERM_PROGRAM", "");
     if (!program.is_empty()) { ret program; }
+    @cfg(target_os = "netbsd") {
+        ret netbsd_terminal_name();
+    }
     const detected: String = os.terminal();
     if (detected.as_str() == "unknown") { ret String.new(); }
     detected
@@ -58,6 +62,15 @@ fn wm_name() String {
     if (name.is_empty()) {
         const desktop: String = os.env("XDG_CURRENT_DESKTOP", "");
         if (is_standalone_wm(desktop.as_str())) { name = desktop; }
+    }
+    if (name.is_empty()) {
+        const session = text.first_env("XDG_SESSION_DESKTOP", "DESKTOP_SESSION");
+        if (is_standalone_wm(session.as_str())) { name = session; }
+    }
+    if (name.is_empty()) {
+        @cfg(target_os = "netbsd") {
+            name = netbsd_configured_session();
+        }
     }
     if (name.is_empty()) { ret String.new(); }
     text.basename(name.as_str())
@@ -136,12 +149,25 @@ pub fn lookup(key: str) String {
     if (key == "de") {
         var name: String = os.env("XDG_CURRENT_DESKTOP", "");
         if (name.is_empty()) { name = text.first_env("XDG_SESSION_DESKTOP", "DESKTOP_SESSION"); }
+        if (name.is_empty()) {
+            @cfg(target_os = "netbsd") {
+                const configured = netbsd_configured_session();
+                if (configured.as_str() == "startxfce4") { name = String.from("Xfce"); }
+                if (configured.as_str() == "gnome-session") { name = String.from("GNOME"); }
+                if (configured.as_str() == "startplasma-x11") { name = String.from("KDE Plasma"); }
+                if (configured.as_str() == "mate-session") { name = String.from("MATE"); }
+            }
+        }
         if (name.is_empty() || is_standalone_wm(name.as_str())) { ret String.new(); }
         const version = de_version(name.as_str());
         ret compose(name.as_str(), version.as_str(), true);
     }
     if (key == "wm") {
         const name = wm_name();
+        if (name.as_str() == "startxfce4" || name.as_str() == "gnome-session" ||
+            name.as_str() == "startplasma-x11" || name.as_str() == "mate-session") {
+            ret String.new();
+        }
         const version = wm_version(name.as_str());
         ret compose(name.as_str(), version.as_str(), true);
     }
@@ -151,5 +177,144 @@ pub fn lookup(key: str) String {
     }
     if (key == "display") { ret display.value(); }
     if (key == "display_label") { ret display.label(); }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_parent_id(status: str) i32 {
+    // NetBSD procfs status: comm pid ppid pgrp ...
+    const raw = text.word(status, 2);
+    const parsed = raw.as_str().parse[i32]();
+    if (parsed.is_err()) { ret 0; }
+    const pid = parsed.unwrap();
+    if (pid <= 1) { ret 0; }
+    pid
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_process(comm: str) String {
+    const name = text.basename(comm);
+    if (name.as_str() == "alacritty") { ret String.from("alacritty"); }
+    if (name.as_str() == "xterm" || name.as_str() == "uxterm") { ret String.from("xterm"); }
+    if (name.as_str() == "kitty") { ret String.from("kitty"); }
+    if (name.as_str() == "foot" || name.as_str() == "footclient") { ret String.from("foot"); }
+    if (name.as_str() == "wezterm-gui") { ret String.from("wezterm"); }
+    if (name.as_str() == "konsole") { ret String.from("konsole"); }
+    if (name.as_str() == "xfce4-terminal" || name.as_str() == "mate-terminal" ||
+        name.as_str() == "gnome-terminal" || name.as_str() == "qterminal" ||
+        name.as_str() == "st" || name.as_str() == "urxvt" || name.as_str() == "rxvt" ||
+        name.as_str() == "terminator" || name.as_str() == "ghostty" ||
+        name.as_str() == "tilix" || name.as_str() == "sakura" || name.as_str() == "lxterminal") {
+        ret name;
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_ancestors() String {
+    @cfg(target_os = "netbsd") {
+        var pid = os.getppid();
+        var depth: usize = 0;
+        for (pid > 1 && depth < 12) {
+            const path = text.join(text.join("/proc/", pid.to_string().as_str()).as_str(), "/status");
+            const status = text.file(path.as_str());
+            if (status.is_empty()) { break; }
+            const comm = text.word(status.as_str(), 0);
+            const terminal = netbsd_terminal_process(comm.as_str());
+            if (!terminal.is_empty()) { ret terminal; }
+            const next = netbsd_parent_id(status.as_str());
+            if (next <= 1 || next == pid) { break; }
+            pid = next;
+            depth++;
+        }
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_env() String {
+    if (!os.env("ALACRITTY_SOCKET", "").is_empty() ||
+        !os.env("ALACRITTY_LOG", "").is_empty()) {
+        ret String.from("alacritty");
+    }
+    if (!os.env("KITTY_WINDOW_ID", "").is_empty()) { ret String.from("kitty"); }
+    if (!os.env("WEZTERM_PANE", "").is_empty()) { ret String.from("wezterm"); }
+    if (!os.env("GHOSTTY_RESOURCES_DIR", "").is_empty()) { ret String.from("ghostty"); }
+    if (!os.env("KONSOLE_VERSION", "").is_empty()) { ret String.from("konsole"); }
+    const program = os.env("TERM_PROGRAM", "");
+    if (!program.is_empty()) { ret program; }
+    const term = os.env("TERM", "");
+    // TERM describes a terminal capability set, not necessarily the emulator.
+    if (term.as_str() == "alacritty" || term.as_str() == "kitty" || term.as_str() == "foot" ||
+        term.as_str() == "wezterm" || term.as_str() == "ghostty") {
+        ret term;
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_name() String {
+    // A running process is more reliable than a possibly inherited marker.
+    const ancestor = netbsd_terminal_ancestors();
+    if (!ancestor.is_empty()) { ret ancestor; }
+    netbsd_terminal_env()
+}
+
+// Read a simple "exec <program>" line from an X11 startup script.
+// Do not interpret shell commands, substitutions or wrappers.
+@cfg(target_os = "netbsd")
+fn netbsd_startup_program(raw: str) String {
+    const length = core.strlen(raw);
+    var start: usize = 0;
+    var i: usize = 0;
+    var candidate = String.new();
+    for (i <= length) {
+        if (i == length || core.str_byte_at(raw, i) == 10) {
+            const line = text.byte_slice(raw, start, i).trim();
+            if (line.as_str().starts_with("exec ") || line.as_str().starts_with("exec\t")) {
+                const command = text.word(line.as_str(), 1);
+                if (!command.is_empty()) {
+                    var name = text.basename(command.as_str());
+                    if (name.as_str() == "env" || name.as_str() == "dbus-launch" ||
+                        name.as_str() == "dbus-run-session") {
+                        var index: usize = 2;
+                        for (index < 12) {
+                            const argument = text.word(line.as_str(), index);
+                            if (argument.is_empty()) { break; }
+                            if (!argument.as_str().starts_with("-") &&
+                                !argument.contains("=")) {
+                                name = text.basename(argument.as_str());
+                                break;
+                            }
+                            index++;
+                        }
+                    }
+                    if (!name.is_empty() && name.as_str() != "env" &&
+                        name.as_str() != "dbus-launch" && name.as_str() != "dbus-run-session" &&
+                        name.as_str() != "sh" && name.as_str() != "bash") {
+                        candidate = name;
+                    }
+                }
+            }
+            start = i + 1;
+        }
+        i++;
+    }
+    candidate
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_configured_session() String {
+    @cfg(target_os = "netbsd") {
+        if (os.env("DISPLAY", "").is_empty() &&
+            os.env("WAYLAND_DISPLAY", "").is_empty()) { ret String.new(); }
+        const home = os.env("HOME", "");
+        if (home.is_empty()) { ret String.new(); }
+        const xinit = text.file(text.join(home.as_str(), "/.xinitrc").as_str());
+        const from_xinit = netbsd_startup_program(xinit.as_str());
+        if (!from_xinit.is_empty()) { ret from_xinit; }
+        const xsession = text.file(text.join(home.as_str(), "/.xsession").as_str());
+        ret netbsd_startup_program(xsession.as_str());
+    }
     String.new()
 }
