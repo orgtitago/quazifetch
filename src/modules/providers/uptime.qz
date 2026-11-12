@@ -1,0 +1,71 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.core;
+import text;
+
+fn uptime() String {
+    @cfg(target_os = "linux") {
+        const raw: String = text.file("/proc/uptime");
+        const separator = raw.find(".");
+        if (separator.is_none()) { ret String.new(); }
+        const seconds_text = text.byte_slice(raw.as_str(), 0, separator.unwrap());
+        const parsed = seconds_text.parse[u64]();
+        if (parsed.is_err()) { ret String.new(); }
+        const seconds: u64 = parsed.unwrap();
+        const days: u64 = seconds / 86400;
+        const hours: u64 = (seconds % 86400) / 3600;
+        const minutes: u64 = (seconds % 3600) / 60;
+        var result: String = String.new();
+        if (days > 0) {
+            const day: String = days.to_string();
+            result = result.push_str(day.as_str());
+            if (days == 1) { result = result.push_str(" day, "); }
+            else { result = result.push_str(" days, "); }
+        }
+        const hm = text.hours_minutes(hours, minutes, days > 0);
+        ret result.push_str(hm.as_str());
+    }
+    @cfg(target_os = "netbsd") {
+        ret netbsd_uptime_from(text.file("/kern/time").as_str(),
+                                    text.file("/kern/boottime").as_str());
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_first_number(raw: str) u64 {
+    const length = core.strlen(raw);
+    var end: usize = 0;
+    for (end < length) {
+        const byte = core.str_byte_at(raw, end);
+        if (byte < 48 || byte > 57) { break; }
+        end++;
+    }
+    if (end == 0) { ret 0; }
+    const number = text.byte_slice(raw, 0, end);
+    const parsed = number.as_str().parse[u64]();
+    if (parsed.is_err()) { ret 0; }
+    parsed.unwrap()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_uptime_from(now_raw: str, boot_raw: str) String {
+    const now = netbsd_first_number(now_raw);
+    const boot = netbsd_first_number(boot_raw);
+    if (boot == 0 || now <= boot) { ret String.new(); }
+    const seconds = now - boot;
+    const days = seconds / 86400;
+    const hours = (seconds % 86400) / 3600;
+    const minutes = (seconds % 3600) / 60;
+    var result = String.new();
+    if (days > 0) {
+        result = days.to_string();
+        if (days == 1) { result = result.push_str(" day, "); }
+        else { result = result.push_str(" days, "); }
+    }
+    const clock = text.hours_minutes(hours, minutes, days > 0);
+    result.push_str(clock.as_str())
+}
+
+pub fn value() String { uptime() }

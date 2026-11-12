@@ -58,7 +58,7 @@ pub fn save(program: str, executable_path: str, value: str) void {
         const text_content = prefix.push_str(value);
         const written = file.write_str(text_content.as_str());
         const closed = file.close();
-        if (written.is_err() || closed.is_err()) {
+        if (written.is_err() || written.unwrap() != text_content.bytes_len() || closed.is_err()) {
             const discarded = fs.remove(temporary.as_str());
             ret;
         }

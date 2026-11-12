@@ -5,7 +5,6 @@
 import std.core;
 import text;
 import std.os;
-import android;
 
 @syscall("statfs")
 unsafe fn linux_statfs(path: str, output: *u8) i32;
@@ -43,7 +42,7 @@ fn root_fs() String {
 }
 
 pub fn label() String {
-    if (android.is_termux() && !os.env("HOME", "").is_empty()) {
+    if (os.env("PREFIX", "").contains("com.termux") && !os.env("HOME", "").is_empty()) {
         ret String.from("Disk (Home)");
     }
     String.from("Disk (/)")
@@ -52,7 +51,7 @@ pub fn label() String {
 pub fn root_usage() String {
     @cfg(target_os = "linux") {
         var target: String = String.from("/");
-        if (android.is_termux()) {
+        if (os.env("PREFIX", "").contains("com.termux")) {
             const home = os.env("HOME", "");
             if (!home.is_empty()) { target = home; }
         }

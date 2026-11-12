@@ -9,7 +9,6 @@ import text;
 import dir_entries;
 import commands;
 import nix_cache;
-import android;
 
 fn source_file(path: str) String {
     const read = fs.read_to_string_with_limit(path, 16777216);
@@ -191,16 +190,12 @@ fn flatpak(root: str) usize { flatpak_apps(root) + flatpak_runtime(root) }
 
 fn linux_packages() String {
     var result: String = String.new();
-    // Termux keeps its dpkg database under $PREFIX.
-    if (android.is_termux()) {
-        const prefix = os.env("PREFIX", "");
-        if (!prefix.is_empty()) {
-            const status = source_file(text.join(prefix.as_str(), "/var/lib/dpkg/status").as_str());
-            if (!status.is_empty()) {
-                result = add(result, text.count_lines(status.as_str(), "Status: install ok installed"), "termux");
-            }
+    const prefix = os.env("PREFIX", "");
+    if (!prefix.is_empty()) {
+        const status = source_file(text.join(prefix.as_str(), "/var/lib/dpkg/status").as_str());
+        if (!status.is_empty()) {
+            ret add(result, text.count_lines(status.as_str(), "Status: install ok installed"), "termux");
         }
-        ret result;
     }
     const home: String = os.env("HOME", "");
     var flatpak_count: usize = flatpak(rooted("/var/lib/flatpak").as_str());

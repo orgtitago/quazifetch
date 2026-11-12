@@ -7,7 +7,6 @@ import std.fs;
 import std.os;
 import text;
 import dir_entries;
-import android;
 
 fn pci_card() String {
     const root: String = os.env("QUAZIFETCH_DRM_ROOT", "/sys/class/drm");
@@ -84,26 +83,28 @@ fn pci_name_from_db(data: str, vendor_id: str, device_id: str) String {
     String.new()
 }
 
+fn pci_db_path(path: str, vendor_id: str, device_id: str) String {
+    const content = fs.read_to_string_with_limit(path, 8388608);
+    if (content.is_err()) { ret String.new(); }
+    const db = content.unwrap();
+    pci_name_from_db(db.as_str(), vendor_id, device_id)
+}
+
 fn pci_db(vendor_id: str, device_id: str) String {
-    const custom: String = os.env("QUAZIFETCH_PCI_IDS", "");
-    var paths: Array[str] = Array.new();
-    if (!custom.is_empty()) { paths.push(custom.as_str()); }
-    paths.push("/run/current-system/sw/share/hwdata/pci.ids");
-    paths.push("/run/current-system/sw/share/pci.ids");
-    paths.push("/usr/share/hwdata/pci.ids");
-    paths.push("/usr/share/misc/pci.ids");
-    paths.push("/usr/share/pci.ids");
-    var i: usize = 0;
-    for (i < paths.len()) {
-        const content = fs.read_to_string_with_limit(paths[i], 8388608);
-        if (content.is_ok()) {
-            const db: String = content.unwrap();
-            const name: String = pci_name_from_db(db.as_str(), vendor_id, device_id);
-            if (!name.is_empty()) { ret name; }
-        }
-        i++;
+    const custom = os.env("QUAZIFETCH_PCI_IDS", "");
+    if (!custom.is_empty()) {
+        const name = pci_db_path(custom.as_str(), vendor_id, device_id);
+        if (!name.is_empty()) { ret name; }
     }
-    String.new()
+    const nix = pci_db_path("/run/current-system/sw/share/hwdata/pci.ids", vendor_id, device_id);
+    if (!nix.is_empty()) { ret nix; }
+    const nix_local = pci_db_path("/run/current-system/sw/share/pci.ids", vendor_id, device_id);
+    if (!nix_local.is_empty()) { ret nix_local; }
+    const hwdata = pci_db_path("/usr/share/hwdata/pci.ids", vendor_id, device_id);
+    if (!hwdata.is_empty()) { ret hwdata; }
+    const misc = pci_db_path("/usr/share/misc/pci.ids", vendor_id, device_id);
+    if (!misc.is_empty()) { ret misc; }
+    pci_db_path("/usr/share/pci.ids", vendor_id, device_id)
 }
 
 fn udev_name(card: str) String {
@@ -126,7 +127,10 @@ pub fn name() String {
     @cfg(target_os = "netbsd") { ret netbsd_gpu_from(text.boot_log().as_str()); }
     @cfg(target_os = "linux") {
         const card: String = pci_card();
-        if (card.is_empty()) { ret android.gpu_name(); }
+        if (card.is_empty()) {
+            const path = os.env("QUAZIFETCH_ANDROID_GPU_SYSFS", "/sys/class/kgsl/kgsl-3d0/gpu_model");
+            ret text.file(path.as_str());
+        }
         const vendor_path: String = text.join(card.as_str(), "/device/vendor");
         const device_path: String = text.join(card.as_str(), "/device/device");
         const raw_vendor: String = text.file(vendor_path.as_str());

@@ -33,38 +33,20 @@ fn file_for(role: str, create: bool) String {
     cache_file(name.as_str(), create)
 }
 
-// Linux x86-64 stat layout: dev 0, inode 8, size 48, mtime 88.
-// stat follows the profile symlink, so switching generations changes the key.
+// Cache by resolved path and metadata. Profile generation changes alter the path.
 pub fn fingerprint(path: str) String {
     @cfg(target_os = "linux") {
-        var raw: *u8 = 0;
-        unsafe { raw = core.malloc(144); }
-        if (raw == 0) { ret String.new(); }
-        var result: i32 = -1;
-        unsafe { result = unix.stat(path, raw); }
-        if (result != 0) { unsafe { core.free(raw); } ret String.new(); }
-        var dev: u64 = 0;
-        var inode: u64 = 0;
-        var size: u64 = 0;
-        var mt: u64 = 0;
-        var mt_ns: u64 = 0;
-        unsafe {
-            dev = *(raw as *u64);
-            inode = *((raw + 8) as *u64);
-            size = *((raw + 48) as *u64);
-            mt = *((raw + 88) as *u64);
-            mt_ns = *((raw + 96) as *u64);
-            core.free(raw);
-        }
-        var key = dev.to_string();
+        const resolved = fs.canonicalize(path);
+        if (resolved.is_err()) { ret String.new(); }
+        const full = resolved.unwrap();
+        const info = fs.metadata(full.as_str());
+        if (info.is_err()) { ret String.new(); }
+        const meta = info.unwrap();
+        var key = String.from(full.as_str());
         key = key.push_str(":");
-        key = key.push_str(inode.to_string().as_str());
+        key = key.push_str(meta.len().to_string().as_str());
         key = key.push_str(":");
-        key = key.push_str(size.to_string().as_str());
-        key = key.push_str(":");
-        key = key.push_str(mt.to_string().as_str());
-        key = key.push_str(":");
-        ret key.push_str(mt_ns.to_string().as_str());
+        ret key.push_str(meta.modified_unix_nanos().to_string().as_str());
     }
     String.new()
 }

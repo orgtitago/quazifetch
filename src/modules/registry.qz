@@ -1,22 +1,77 @@
 // Copyright (c) 2026 titago
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import providers.identity;
-import providers.system_info;
-import providers.hardware;
-import providers.session;
-import providers.packages;
+import providers.username as pf_username;
+import providers.hostname as pf_hostname;
+import providers.home as pf_home;
+import providers.locale as pf_locale;
+import providers.editor as pf_editor;
+import providers.pid as pf_pid;
+import providers.os_info as pf_os_info;
+import providers.os_name as pf_os_name;
+import providers.distro as pf_distro;
+import providers.kernel as pf_kernel;
+import providers.uptime as pf_uptime;
+import providers.arch as pf_arch;
+import providers.init as pf_init;
+import providers.timezone as pf_timezone;
+import providers.cpu as pf_cpu;
+import providers.cpu_threads as pf_cpu_threads;
+import providers.memory as pf_memory;
+import providers.swap as pf_swap;
+import providers.battery as pf_battery;
+import providers.gpu as pf_gpu;
+import providers.disk as pf_disk;
+import providers.machine as pf_machine;
+import providers.board as pf_board;
+import providers.vendor as pf_vendor;
+import providers.firmware as pf_firmware;
+import providers.wm as pf_wm;
+import providers.de as pf_de;
+import providers.shell as pf_shell;
+import providers.terminal as pf_terminal;
+import providers.session as pf_session;
+import providers.display as pf_display;
+import providers.packages as pf_packages;
 
 pub fn lookup(key: str) String {
-    var result: String = identity.lookup(key);
-    if (!result.is_empty()) { ret result; }
-    result = system_info.lookup(key);
-    if (!result.is_empty()) { ret result; }
-    result = hardware.lookup(key);
-    if (!result.is_empty()) { ret result; }
-    result = session.lookup(key);
-    if (!result.is_empty()) { ret result; }
-    packages.lookup(key)
+    if (key == "username") { ret pf_username.value(); }
+    if (key == "hostname") { ret pf_hostname.value(); }
+    if (key == "os") { ret pf_os_info.value(); }
+    if (key == "os_name") { ret pf_os_name.value(); }
+    if (key == "kernel") { ret pf_kernel.value(); }
+    if (key == "arch") { ret pf_arch.value(); }
+    if (key == "cpu") { ret pf_cpu.value(); }
+    if (key == "gpu") { ret pf_gpu.name(); }
+    if (key == "ram") { ret pf_memory.value(); }
+    if (key == "disk") { ret pf_disk.root_usage(); }
+    if (key == "disk_label") { ret pf_disk.label(); }
+    if (key == "swap") { ret pf_swap.value(); }
+    if (key == "battery") { ret pf_battery.value(); }
+    if (key == "battery_label") { ret pf_battery.label(); }
+    if (key == "cpu_threads") { ret pf_cpu_threads.value(); }
+    if (key == "gpu_driver") { ret pf_gpu.driver(); }
+    if (key == "distro") { ret pf_distro.value(); }
+    if (key == "timezone") { ret pf_timezone.value(); }
+    if (key == "shell") { ret pf_shell.value(); }
+    if (key == "terminal") { ret pf_terminal.value(); }
+    if (key == "de") { ret pf_de.value(); }
+    if (key == "wm") { ret pf_wm.value(); }
+    if (key == "init") { ret pf_init.value(); }
+    if (key == "session") { ret pf_session.value(); }
+    if (key == "display") { ret pf_display.value(); }
+    if (key == "display_label") { ret pf_display.label(); }
+    if (key == "packages") { ret pf_packages.lookup("packages"); }
+    if (key == "uptime") { ret pf_uptime.value(); }
+    if (key == "machine") { ret pf_machine.value(); }
+    if (key == "board") { ret pf_board.value(); }
+    if (key == "vendor") { ret pf_vendor.value(); }
+    if (key == "firmware") { ret pf_firmware.value(); }
+    if (key == "locale") { ret pf_locale.value(); }
+    if (key == "home") { ret pf_home.value(); }
+    if (key == "editor") { ret pf_editor.value(); }
+    if (key == "pid") { ret pf_pid.value(); }
+    String.new()
 }
 
 pub fn names() Array[str] {

@@ -1,0 +1,20 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+
+pub fn value() String {
+    @cfg(target_os = "windows") { ret text.first_env("USERNAME", "USER"); }
+    const name = text.first_env("USER", "LOGNAME");
+    if (!name.is_empty()) { ret name; }
+    const prefix = os.env("PREFIX", "");
+    if (!prefix.is_empty() && prefix.contains("com.termux")) {
+        const uid = os.getuid();
+        if (uid != 4294967295 as u32) {
+            const number = uid.to_string();
+            ret text.join("uid", number.as_str());
+        }
+    }
+    String.new()
+}

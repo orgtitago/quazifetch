@@ -16,9 +16,9 @@ A modular system information utility written in Quazi. quazifetch prints hardwar
 - Session details: shell, terminal, desktop environment, window manager, and display information where available.
 - Linux package counts, including Nix profiles and Flatpak.
 - Compile-time module order and colors, with support for `NO_COLOR`.
-- Small, independent providers. Missing information is omitted by default.
+- A separate source file for each system information module. Missing information is omitted by default.
 
-Most detailed hardware detection is Linux-specific. Windows and NetBSD builds use the information exposed by their supported system interfaces. Android/Termux detection is best-effort when running the Linux executable through QEMU user mode; access to host devices depends on the environment.
+Most detailed hardware detection is Linux-specific. Windows and NetBSD builds use the information exposed by their supported system interfaces. NetBSD display information is limited to the available framebuffer mode; old Xorg logs are not treated as live monitor state. Android/Termux detection is best-effort when running the Linux executable through QEMU user mode; access to host devices depends on the environment.
 
 ## Build
 

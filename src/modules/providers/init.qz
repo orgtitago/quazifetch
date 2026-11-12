@@ -1,0 +1,12 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import text;
+
+fn init_name() String {
+    @cfg(target_os = "linux") { ret text.file("/proc/1/comm"); }
+    @cfg(target_os = "netbsd") { ret text.file("/proc/1/comm"); }
+    String.new()
+}
+
+pub fn value() String { init_name() }

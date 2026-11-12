@@ -1,0 +1,24 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+import commands;
+import session;
+import wm;
+
+fn de_version(name: str) String {
+    if (name == "GNOME") { ret commands.version("gnome-shell", "--version"); }
+    if (name == "KDE" || name == "KDE Plasma") { ret commands.version("plasmashell", "--version"); }
+    if (name == "XFCE" || name == "Xfce") { ret commands.version("xfce4-session", "--version"); }
+    if (name == "Cinnamon") { ret commands.version("cinnamon", "--version"); }
+    String.new()
+}
+
+pub fn value() String {
+    var name: String = os.env("XDG_CURRENT_DESKTOP", "");
+    if (name.is_empty()) { name = text.first_env("XDG_SESSION_DESKTOP", "DESKTOP_SESSION"); }
+    if (name.is_empty() || wm.is_standalone_wm(name.as_str())) { ret String.new(); }
+    const version = de_version(name.as_str());
+    session.compose(name.as_str(), version.as_str(), true)
+}

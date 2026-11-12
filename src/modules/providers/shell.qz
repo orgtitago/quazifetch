@@ -1,0 +1,23 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+import commands;
+import session;
+
+fn shell_version(name: str) String {
+    if (name == "fish" || name == "bash" || name == "zsh" || name == "nushell" || name == "nu") {
+        if (name == "nu") { ret commands.version("nu", "--version"); }
+        ret commands.version(name, "--version");
+    }
+    String.new()
+}
+
+pub fn value() String {
+    const full: String = os.shell();
+    if (full.is_empty() || full.as_str() == "unknown") { ret String.new(); }
+    const name = text.basename(full.as_str());
+    const version = shell_version(name.as_str());
+    session.compose(name.as_str(), version.as_str(), false)
+}

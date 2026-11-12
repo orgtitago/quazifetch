@@ -1,0 +1,98 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import std.core;
+import text;
+
+pub fn threads() String {
+    @cfg(target_os = "netbsd") { ret netbsd_cpu_threads_from(text.boot_log().as_str()); }
+    @cfg(target_os = "linux") {
+        const data: String = text.file("/proc/cpuinfo");
+        if (data.is_empty()) { ret String.new(); }
+        const count: usize = text.count_lines(data.as_str(), "processor");
+        if (count > 0) { ret count.to_string(); }
+    }
+    String.new()
+}
+
+// Use the kernel-reported maximum clock when it is available.
+
+fn cpu() String {
+    const model: String = os.cpu_name();
+    if (model.is_empty() || model.as_str() == "unknown") { ret String.new(); }
+    @cfg(target_os = "linux") {
+        var max_clock: String = text.file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+        if (max_clock.is_empty()) {
+            max_clock = text.file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq");
+        }
+        const parsed = max_clock.as_str().parse[u64]();
+        if (parsed.is_ok()) {
+            const khz: u64 = parsed.unwrap();
+            if (khz >= 100000 && khz <= 10000000) {
+                var clean: String = String.from(model.as_str());
+                const suffix = model.find(" CPU @ ");
+                if (suffix.is_some()) {
+                    clean = text.byte_slice(model.as_str(), 0, suffix.unwrap());
+                }
+                const threads_count: String = threads();
+                if (!threads_count.is_empty()) {
+                    clean = clean.push_str(" (");
+                    clean = clean.push_str(threads_count.as_str());
+                    clean = clean.push_str(")");
+                }
+                var ghz: u64 = khz / 1000000;
+                var frac: u64 = ((khz % 1000000) * 100 + 500000) / 1000000;
+                if (frac >= 100) { ghz++; frac = 0; }
+                const whole: String = ghz.to_string();
+                clean = clean.push_str(" @ ");
+                clean = clean.push_str(whole.as_str());
+                clean = clean.push_str(".");
+                if (frac < 10) { clean = clean.push_str("0"); }
+                const fraction: String = frac.to_string();
+                clean = clean.push_str(fraction.as_str());
+                ret clean.push_str(" GHz");
+            }
+        }
+    }
+    @cfg(target_os = "netbsd") {
+        const count = threads();
+        if (!count.is_empty()) {
+            const suffix = text.join(text.join(" (", count.as_str()).as_str(), ")");
+            if (!model.contains(suffix.as_str())) {
+                ret text.join(model.as_str(), suffix.as_str());
+            }
+        }
+    }
+    model
+}
+
+// Battery names differ across machines.
+
+@cfg(target_os = "netbsd")
+fn netbsd_cpu_threads_from(raw: str) String {
+    const length = core.strlen(raw);
+    var i: usize = 0;
+    var start: usize = 0;
+    var count: u64 = 0;
+    for (i <= length) {
+        if (i == length || core.str_byte_at(raw, i) == 10) {
+            if (i > start + 6 && core.str_byte_at(raw, start) == 99 &&
+                core.str_byte_at(raw, start + 1) == 112 && core.str_byte_at(raw, start + 2) == 117) {
+                var n: usize = start + 3;
+                for (n < i) {
+                    const b = core.str_byte_at(raw, n);
+                    if (b < 48 || b > 57) { break; }
+                    n++;
+                }
+                if (n > start + 3 && text.contains_range(raw, n, i, " at ")) { count++; }
+            }
+            start = i + 1;
+        }
+        i++;
+    }
+    if (count == 0) { ret String.new(); }
+    count.to_string()
+}
+
+pub fn value() String { cpu() }

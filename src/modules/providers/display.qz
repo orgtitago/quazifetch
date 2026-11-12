@@ -8,7 +8,6 @@ import std.os;
 import text;
 import dir_entries;
 import display_live;
-import android;
 
 pub struct Monitor {
     name: String,
@@ -70,7 +69,9 @@ fn edid(path: str) Monitor {
     var file = opened.unwrap();
     var data: *u8 = 0;
     unsafe { data = core.malloc(128); }
-    if (data == 0) { ret result; }
+    if (data == 0) {
+        ret result;
+    }
     var length: usize = 0;
     for (length < 128) {
         var n: isize = -1;
@@ -168,21 +169,33 @@ fn monitor_path(path: str) Monitor {
     info
 }
 
+fn fallback_framebuffer() String {
+    const source = os.env("QUAZIFETCH_ANDROID_FB_SYSFS", "/sys/class/graphics/fb0/virtual_size");
+    const dimensions = text.file(source.as_str());
+    const comma = dimensions.find(",");
+    if (comma.is_none()) { ret String.new(); }
+    const split = comma.unwrap();
+    const w = text.byte_slice(dimensions.as_str(), 0, split);
+    const h = text.byte_slice(dimensions.as_str(), split + 1, dimensions.bytes_len());
+    const width = w.as_str().parse[u64]();
+    const height = h.as_str().parse[u64]();
+    if (width.is_err() || height.is_err()) { ret String.new(); }
+    const x = width.unwrap();
+    const y = height.unwrap();
+    if (x == 0 || y == 0 || x > 16384 || y > 16384) { ret String.new(); }
+    const first = x.to_string();
+    const second = y.to_string();
+    var result = first.push_str("x");
+    result = result.push_str(second.as_str());
+    result.push_str(" [Framebuffer]")
+}
+
 pub fn label() String {
-    @cfg(target_os = "netbsd") {
-        const resolution = netbsd_framebuffer_from(text.boot_log().as_str());
-        const panel = xorg_current(resolution.as_str());
-        if (!panel.name.is_empty()) {
-            var name = String.from("Display (");
-            name = name.push_str(panel.name.as_str());
-            ret name.push_str(")");
-        }
-        ret String.from("Display (Framebuffer)");
-    }
+    @cfg(target_os = "netbsd") { ret String.from("Display"); }
     const connector_path = connector();
     const current = monitor_path(connector_path.as_str());
     if (current.name.is_empty()) {
-        if (!android.framebuffer().is_empty()) { ret String.from("Display (Framebuffer)"); }
+        if (!fallback_framebuffer().is_empty()) { ret String.from("Display (Framebuffer)"); }
         ret String.from("Display");
     }
     var result: String = String.from("Display (");
@@ -192,26 +205,11 @@ pub fn label() String {
 
 pub fn value() String {
     @cfg(target_os = "netbsd") {
-        var value = netbsd_framebuffer_from(text.boot_log().as_str());
-        const panel = xorg_current(value.as_str());
-        if (value.is_empty()) { ret value; }
-        if (panel.diagonal > 0) {
-            const diagonal = panel.diagonal.to_string();
-            value = value.push_str(" in ");
-            value = value.push_str(diagonal.as_str());
-            value = value.push_str("\"");
-        }
-        if (panel.hz > 0) {
-            const hz = panel.hz.to_string();
-            value = value.push_str(", ");
-            value = value.push_str(hz.as_str());
-            value = value.push_str(" Hz");
-        }
-        ret value;
+        ret netbsd_framebuffer_from(text.boot_log().as_str());
     }
     const connector_path = connector();
     var current = monitor_path(connector_path.as_str());
-    if (current.width == 0 || current.height == 0) { ret android.framebuffer(); }
+    if (current.width == 0 || current.height == 0) { ret fallback_framebuffer(); }
     const connector_basename = text.basename(connector_path.as_str());
     const dash = connector_basename.find("-");
     var active = display_live.missing();
@@ -279,225 +277,4 @@ fn netbsd_framebuffer_from(raw: str) String {
         i++;
     }
     String.new()
-}
-
-
-
-@cfg(target_os = "netbsd")
-struct XorgPanel {
-    name: String,
-    diagonal: u64,
-    hz: u64,
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_empty() XorgPanel {
-    XorgPanel { name: String.new(), diagonal: 0, hz: 0 }
-}
-
-// Rootless Xorg normally logs under HOME; display managers often use /var/log.
-@cfg(target_os = "netbsd")
-fn xorg_log() String {
-    const xdg = os.env("XDG_DATA_HOME", "");
-    if (!xdg.is_empty()) {
-        const path = text.join(xdg.as_str(), "/xorg/Xorg.0.log");
-        const data = text.file(path.as_str());
-        if (!data.is_empty()) { ret data; }
-    }
-    const home = os.env("HOME", "");
-    if (!home.is_empty()) {
-        const path = text.join(home.as_str(), "/.local/share/xorg/Xorg.0.log");
-        const data = text.file(path.as_str());
-        if (!data.is_empty()) { ret data; }
-    }
-    text.file("/var/log/Xorg.0.log")
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_number(raw: str) u64 {
-    const n = core.strlen(raw);
-    var i: usize = 0;
-    var result: u64 = 0;
-    for (i < n) {
-        const b = core.str_byte_at(raw, i);
-        if (b < 48 || b > 57) { break; }
-        result = result * 10 + (b - 48) as u64;
-        i++;
-    }
-    result
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_token(raw: str) String {
-    const len = core.strlen(raw);
-    var i: usize = 0;
-    for (i < len) {
-        const b = core.str_byte_at(raw, i);
-        if (b == 32 || b == 9 || b == 10 || b == 13) { break; }
-        i++;
-    }
-    text.byte_slice(raw, 0, i)
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_after(raw: str, marker: str) String {
-    const at = raw.find(marker);
-    if (at.is_none()) { ret String.new(); }
-    text.byte_slice(raw, at.unwrap() + core.strlen(marker), core.strlen(raw))
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_manufacturer(raw: str) String {
-    const part = xorg_after(raw, "Manufacturer: ");
-    if (part.is_empty()) { ret String.new(); }
-    const manufacturer_id = xorg_token(part.as_str());
-    if (manufacturer_id.bytes_len() != 3) { ret String.new(); }
-    const model = xorg_after(part.as_str(), "Model: ");
-    if (model.is_empty()) { ret String.new(); }
-    const id = xorg_token(model.as_str());
-    if (id.is_empty() || id.bytes_len() > 4) { ret String.new(); }
-    var i: usize = 0;
-    for (i < id.bytes_len()) {
-        const b = core.str_byte_at(id.as_str(), i);
-        if (!((b >= 48 && b <= 57) || (b >= 65 && b <= 70) || (b >= 97 && b <= 102))) {
-            ret String.new();
-        }
-        i++;
-    }
-    // EDID product identifiers are four-digit hexadecimal values.
-    var result = manufacturer_id.to_uppercase();
-    const upper = id.to_uppercase();
-    var pad: usize = id.bytes_len();
-    for (pad < 4) { result = result.push_str("0"); pad++; }
-    result.push_str(upper.as_str())
-}
-
-
-@cfg(target_os = "netbsd")
-fn xorg_hex4(value: u64) String {
-    const digits = "0123456789ABCDEF";
-    var result = String.new();
-    var i: u64 = 4;
-    for (i > 0) {
-        i--;
-        const position = (value >> (i * 4)) & 15;
-        const digit = text.byte_slice(digits, position as usize, (position + 1) as usize);
-        result = result.push_str(digit.as_str());
-    }
-    result
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_edid_vendor(raw: str) String {
-    const segment = xorg_after(raw, "EDID vendor \"");
-    if (segment.is_empty()) { ret String.new(); }
-    const closing = segment.find("\"");
-    if (closing.is_none() || closing.unwrap() != 3) { ret String.new(); }
-    const vendor = text.byte_slice(segment.as_str(), 0, 3).to_uppercase();
-    const id = xorg_after(segment.as_str(), "prod id ");
-    if (id.is_empty()) { ret String.new(); }
-    const number_id = xorg_number(id.as_str());
-    if (number_id > 65535) { ret String.new(); }
-    const product = xorg_hex4(number_id);
-    vendor.push_str(product.as_str())
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_diagonal(raw: str) u64 {
-    const info = xorg_after(raw, "Max Image Size [cm]:");
-    if (info.is_empty()) { ret 0; }
-    const line_end = info.find("\n");
-    var line = String.from(info.as_str());
-    if (line_end.is_some()) { line = text.byte_slice(info.as_str(), 0, line_end.unwrap()); }
-    const width = xorg_after(line.as_str(), "horiz.:");
-    const height = xorg_after(line.as_str(), "vert.:");
-    if (width.is_empty() || height.is_empty()) { ret 0; }
-    const w = xorg_number(width.as_str().trim().as_str());
-    const h = xorg_number(height.as_str().trim().as_str());
-    if (w == 0 || h == 0 || w > 500 || h > 500) { ret 0; }
-    // Centimetres to rounded diagonal inches, without floating point.
-    const square: u64 = w * w + h * h;
-    var root: u64 = square;
-    var next: u64 = (root + 1) / 2;
-    for (next < root) { root = next; next = (root + square / root) / 2; }
-    (root * 100 + 127) / 254
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_clock_khz(raw: str) u64 {
-    const whole = xorg_number(raw);
-    if (whole == 0 || whole > 1000) { ret 0; }
-    var result = whole * 1000;
-    const dot = raw.find(".");
-    if (dot.is_none()) { ret result; }
-    var place: u64 = 100;
-    var i = dot.unwrap() + 1;
-    for (i < core.strlen(raw) && place > 0) {
-        const b = core.str_byte_at(raw, i);
-        if (b < 48 || b > 57) { break; }
-        result += (b - 48) as u64 * place;
-        place /= 10;
-        i++;
-    }
-    result
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_refresh(raw: str, resolution: str) u64 {
-    if (resolution.is_empty()) { ret 0; }
-    var key = String.from("Modeline \"");
-    key = key.push_str(resolution);
-    key = key.push_str("\"x");
-    const data = xorg_after(raw, key.as_str());
-    if (data.is_empty()) { ret 0; }
-    const end = data.find("\n");
-    var line = String.from(data.as_str());
-    if (end.is_some()) { line = text.byte_slice(data.as_str(), 0, end.unwrap()); }
-    // Xorg normally prints x60.0; some drivers print x0.0 instead.
-    const first = text.word(line.as_str(), 0);
-    const reported = xorg_number(first.as_str());
-    if (reported >= 20 && reported <= 360) { ret reported; }
-    const clock = text.word(line.as_str(), 1);
-    const htotal = text.word(line.as_str(), 5);
-    const vtotal = text.word(line.as_str(), 9);
-    const khz = xorg_clock_khz(clock.as_str());
-    const h = xorg_number(htotal.as_str());
-    const v = xorg_number(vtotal.as_str());
-    if (khz == 0 || h == 0 || v == 0 || h > 32768 || v > 32768) { ret 0; }
-    const hz = (khz * 1000 + (h * v) / 2) / (h * v);
-    if (hz >= 20 && hz <= 360) { ret hz; }
-    0
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_parse(raw: str, resolution: str) XorgPanel {
-    if (raw == "") { ret xorg_empty(); }
-    // Prefer the built-in connector if the log also lists external monitors.
-    var segment = String.from(raw);
-    var offset = segment.find("EDID for output eDP");
-    if (offset.is_none()) { offset = segment.find("EDID for output LVDS"); }
-    if (offset.is_none()) { offset = segment.find("EDID for output DSI"); }
-    if (offset.is_some()) {
-        segment = text.byte_slice(raw, offset.unwrap(), core.strlen(raw));
-    }
-    var at = segment.find("Manufacturer: ");
-    if (at.is_none()) { at = segment.find("EDID vendor \""); }
-    if (at.is_none()) { ret xorg_empty(); }
-    const rest = text.byte_slice(segment.as_str(), at.unwrap(), segment.bytes_len());
-    const next = rest.find("EDID for output ");
-    var block = String.from(rest.as_str());
-    if (next.is_some()) { block = text.byte_slice(rest.as_str(), 0, next.unwrap()); }
-    var code = xorg_manufacturer(block.as_str());
-    if (code.is_empty()) { code = xorg_edid_vendor(block.as_str()); }
-    XorgPanel {
-        name: code,
-        diagonal: xorg_diagonal(block.as_str()),
-        hz: xorg_refresh(block.as_str(), resolution),
-    }
-}
-
-@cfg(target_os = "netbsd")
-fn xorg_current(resolution: str) XorgPanel {
-    const log = xorg_log();
-    xorg_parse(log.as_str(), resolution)
 }

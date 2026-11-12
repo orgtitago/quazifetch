@@ -22,18 +22,17 @@ fn header() String {
     result.push_str(hostname.as_str())
 }
 
-fn styled_header(use_color: bool) String {
-    const plain = header();
-    if (!use_color) { ret plain; }
-    const user = registry.lookup("username");
-    const host = registry.lookup("hostname");
-    if (user.is_empty() || host.is_empty()) { ret accent(plain.as_str(), true); }
+fn styled_header(user: str, host: str, use_color: bool) String {
+    var plain = String.from(user);
+    if (user == "") { plain = String.from(host); }
+    else if (host != "") { plain = plain.push_str("@").push_str(host); }
+    if (!use_color || user == "" || host == "") { ret accent(plain.as_str(), use_color); }
     var result = String.from(config.label_color());
-    result = result.push_str(user.as_str());
+    result = result.push_str(user);
     result = result.push_str(config.value_color());
     result = result.push_str("@");
     result = result.push_str(config.label_color());
-    result = result.push_str(host.as_str());
+    result = result.push_str(host);
     result.push_str("\e[0m")
 }
 
@@ -90,9 +89,12 @@ fn highlight_percentages(value: str, use_color: bool) String {
 pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
     if (key == "blank") { ret Rendered { text: String.new(), available: true }; }
     if (key == "header") {
-        const name = header();
-        if (name.is_empty()) { ret Rendered { text: String.new(), available: false }; }
-        ret Rendered { text: styled_header(use_color), available: true };
+        const user = registry.lookup("username");
+        const host = registry.lookup("hostname");
+        if (user.is_empty() && host.is_empty()) {
+            ret Rendered { text: String.new(), available: false };
+        }
+        ret Rendered { text: styled_header(user.as_str(), host.as_str(), use_color), available: true };
     }
     if (key == "separator") {
         const name = header();

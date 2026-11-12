@@ -1,0 +1,48 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+
+fn android_release() String {
+    const build = os.env("QUAZIFETCH_ANDROID_BUILD_PROP", "/system/build.prop");
+    const release = text.file_field(build.as_str(), "ro.build.version.release=");
+    if (release.is_empty()) {
+        if (!os.env("ANDROID_ROOT", "").is_empty() ||
+            !os.env("TERMUX_VERSION", "").is_empty()) { ret String.from("Android"); }
+        ret String.new();
+    }
+    var result = String.from("Android ");
+    result = result.push_str(release.as_str());
+    if (!os.env("TERMUX_VERSION", "").is_empty()) { result = result.push_str(" (Termux)"); }
+    result
+}
+
+fn distribution() String {
+    const mobile = android_release();
+    if (!mobile.is_empty()) { ret mobile; }
+    @cfg(target_os = "linux") {
+        const pretty: String = text.file_field("/etc/os-release", "PRETTY_NAME=");
+        if (!pretty.is_empty()) { ret pretty; }
+        const other: String = text.file_field("/usr/lib/os-release", "PRETTY_NAME=");
+        if (!other.is_empty()) { ret other; }
+    }
+    @cfg(target_os = "netbsd") {
+        const release = netbsd_os_name(text.file("/kern/version").as_str());
+        if (!release.is_empty()) { ret release; }
+    }
+    os.version()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_os_name(raw: str) String {
+    const line = text.first_line(raw);
+    if (!line.as_str().starts_with("NetBSD ")) { ret String.new(); }
+    const release = text.byte_slice(line.as_str(), 7, line.bytes_len());
+    const space = release.find(" ");
+    if (space.is_none()) { ret String.from(line.as_str()); }
+    const version = text.byte_slice(release.as_str(), 0, space.unwrap());
+    text.join("NetBSD ", version.as_str())
+}
+
+pub fn value() String { distribution() }

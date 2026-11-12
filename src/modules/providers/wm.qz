@@ -1,0 +1,70 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import std.core;
+import text;
+import commands;
+import hypr_ipc;
+import session;
+
+pub fn is_standalone_wm(name: str) bool {
+    name == "Hyprland" || name == "sway" || name == "swayfx" ||
+        name == "river" || name == "niri" || name == "labwc" ||
+        name == "dwm" || name == "i3" || name == "bspwm" ||
+        name == "awesome" || name == "openbox" || name == "qtile" ||
+        name == "weston" || name == "cwm" || name == "ctwm" ||
+        name == "vxwm" || name == "fvwm" || name == "twm" || name == "jwm"
+}
+
+fn wm_name() String {
+    var name: String = text.first_env("WINDOWMANAGER", "WM");
+    if (name.is_empty()) {
+        const desktop: String = os.env("XDG_CURRENT_DESKTOP", "");
+        if (is_standalone_wm(desktop.as_str())) { name = desktop; }
+    }
+    if (name.is_empty()) {
+        const current_session = text.first_env("XDG_SESSION_DESKTOP", "DESKTOP_SESSION");
+        if (is_standalone_wm(current_session.as_str())) { name = current_session; }
+    }
+    if (name.is_empty()) { ret String.new(); }
+    text.basename(name.as_str())
+}
+
+fn wm_version(name: str) String {
+    if (name == "Hyprland") {
+        const response = hypr_ipc.request("j/version");
+        if (!response.is_empty()) {
+            var point = response.find("\"tag\"");
+            if (point.is_none()) { point = response.find("\"version\""); }
+            if (point.is_some()) {
+                var from: usize = point.unwrap() + 5;
+                for (from < response.bytes_len()) {
+                    const c = core.str_byte_at(response.as_str(), from);
+                    if (c >= 48 && c <= 57) { break; }
+                    from++;
+                }
+                const suffix = text.byte_slice(response.as_str(), from, response.bytes_len());
+                const parsed = commands.parse_version(suffix.as_str());
+                if (!parsed.is_empty()) { ret parsed; }
+            }
+        }
+        ret commands.version("Hyprland", "--version");
+    }
+    if (name == "sway" || name == "swayfx") { ret commands.version(name, "--version"); }
+    if (name == "niri" || name == "labwc" || name == "river" ||
+        name == "i3" || name == "openbox" || name == "weston") {
+        ret commands.version(name, "--version");
+    }
+    String.new()
+}
+
+pub fn value() String {
+    const name = wm_name();
+    if (name.as_str() == "startxfce4" || name.as_str() == "gnome-session" ||
+        name.as_str() == "startplasma-x11" || name.as_str() == "mate-session") {
+        ret String.new();
+    }
+    const version = wm_version(name.as_str());
+    session.compose(name.as_str(), version.as_str(), true)
+}

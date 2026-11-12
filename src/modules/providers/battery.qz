@@ -1,0 +1,102 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import std.core;
+import text;
+import dir_entries;
+
+fn battery_device() String {
+    @cfg(target_os = "linux") {
+        const root = os.env("QUAZIFETCH_POWER_ROOT", "/sys/class/power_supply");
+        var devices = dir_entries.names(String.from(root.as_str()));
+        for (!devices.is_empty()) {
+            const device = devices.remove(0);
+            const path = text.join(text.join(root.as_str(), "/").as_str(), device.as_str());
+            const kind = text.file(text.join(path.as_str(), "/type").as_str());
+            if (kind.as_str() == "Battery") { ret path; }
+        }
+    }
+    String.new()
+}
+
+fn battery_value(path: str, field: str) u64 {
+    const raw = text.file(text.join(path, field).as_str());
+    const parsed = raw.parse[u64]();
+    if (parsed.is_ok()) { ret parsed.unwrap(); }
+    0
+}
+
+fn battery_label() String {
+    @cfg(target_os = "netbsd") {
+        const value = netbsd_battery_from(text.boot_log().as_str());
+        if (!value.is_empty()) { ret String.from("Battery"); }
+    }
+    const path = battery_device();
+    if (path.is_empty()) { ret String.new(); }
+    const model = text.file(text.join(path.as_str(), "/model_name").as_str());
+    if (model.is_empty()) { ret String.from("Battery"); }
+    var label = String.from("Battery (");
+    label = label.push_str(model.as_str());
+    label.push_str(")")
+}
+
+fn battery() String {
+    @cfg(target_os = "netbsd") { ret netbsd_battery_from(text.boot_log().as_str()); }
+    const path = battery_device();
+    if (path.is_empty()) { ret String.new(); }
+    const capacity = text.file(text.join(path.as_str(), "/capacity").as_str());
+    if (capacity.is_empty()) { ret String.new(); }
+    var result = capacity.push_str("%");
+    const state = text.file(text.join(path.as_str(), "/status").as_str());
+    if (state.as_str() == "Discharging") {
+        var remaining = battery_value(path.as_str(), "/energy_now");
+        var rate = battery_value(path.as_str(), "/power_now");
+        if (rate == 0) {
+            remaining = battery_value(path.as_str(), "/charge_now");
+            rate = battery_value(path.as_str(), "/current_now");
+        }
+        // Energy/power and charge/current both give hours; reject implausible results.
+        if (rate > 0 && remaining < 100000000000) {
+            const minutes: u64 = (remaining * 60 + rate / 2) / rate;
+            if (minutes > 0 && minutes <= 2880) {
+                const h = text.hours_minutes(minutes / 60, minutes % 60, false);
+                result = result.push_str(" (");
+                result = result.push_str(h.as_str());
+                result = result.push_str(" remaining)");
+            }
+        }
+    }
+    if (!state.is_empty() && state.as_str() != "Unknown") {
+        result = result.push_str(" [");
+        result = result.push_str(state.as_str());
+        result = result.push_str("]");
+    }
+    result
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_battery_from(raw: str) String {
+    const length = core.strlen(raw);
+    var i: usize = 0;
+    for (i + 10 < length) {
+        if (text.contains_range(raw, i, i + 7, "acpibat")) {
+            var next: usize = i + 7;
+            for (next < length) {
+                const c = core.str_byte_at(raw, next);
+                if (c < 48 || c > 57) { break; }
+                next++;
+            }
+            if (next > i + 7 && next + 4 <= length &&
+                text.contains_range(raw, next, next + 4, " at ")) {
+                ret String.from("Detected (charge unavailable)");
+            }
+        }
+        i++;
+    }
+    String.new()
+}
+
+pub fn value() String { battery() }
+
+pub fn label() String { battery_label() }

@@ -1,0 +1,40 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+
+fn mobile_model() String {
+    const source = os.env("QUAZIFETCH_ANDROID_BUILD_PROP", "/system/build.prop");
+    var model = text.file_field(source.as_str(), "ro.product.model=");
+    if (model.is_empty()) { model = text.file_field(source.as_str(), "ro.product.vendor.model="); }
+    if (model.is_empty()) { model = text.file_field(source.as_str(), "ro.product.system.model="); }
+    model
+}
+
+pub fn value() String {
+    const model = mobile_model();
+    if (!model.is_empty()) { ret model; }
+    const dmi = text.file("/sys/devices/virtual/dmi/id/product_name");
+    if (!dmi.is_empty()) { ret dmi; }
+    @cfg(target_os = "netbsd") { ret netbsd_machine_from(text.boot_log().as_str()); }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_machine_from(raw: str) String {
+    const all = String.from(raw);
+    const smbios = all.find("SMBIOS rev.");
+    if (smbios.is_none()) { ret String.new(); }
+    const following = text.byte_slice(raw, smbios.unwrap(), all.bytes_len());
+    const next_line = following.find("\n");
+    if (next_line.is_none()) { ret String.new(); }
+    const tail = text.byte_slice(following.as_str(), next_line.unwrap() + 1, following.bytes_len());
+    const candidate = text.first_line(tail.as_str());
+    if (candidate.is_empty() || candidate.contains(":") || candidate.contains(" at ") ||
+        candidate.as_str().starts_with("mainbus") || candidate.as_str().starts_with("acpi") ||
+        candidate.as_str().starts_with("efi") || candidate.as_str().starts_with("cpu")) {
+        ret String.new();
+    }
+    candidate
+}

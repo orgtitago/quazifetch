@@ -1,0 +1,16 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+
+fn memory() String {
+    const total: u64 = os.memory_total();
+    if (total == 0) { ret String.new(); }
+    const available: u64 = os.memory_available();
+    var used: u64 = 0;
+    if (available <= total) { used = total - available; }
+    text.utilization(used, total)
+}
+
+pub fn value() String { memory() }

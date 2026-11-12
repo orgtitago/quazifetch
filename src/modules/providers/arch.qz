@@ -1,0 +1,8 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+
+pub fn value() String {
+    @cfg(target_arch = "x86_64") { ret String.from("x86_64"); }
+    String.new()
+}

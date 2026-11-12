@@ -1,0 +1,29 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import text;
+
+fn memory_kib(data: str, label: str) u64 {
+    const value: String = text.field(data, label);
+    const space = value.find(" ");
+    if (space.is_none()) { ret 0; }
+    const number: String = text.byte_slice(value.as_str(), 0, space.unwrap());
+    const parsed = number.as_str().parse[u64]();
+    if (parsed.is_err()) { ret 0; }
+    parsed.unwrap()
+}
+
+fn swap() String {
+    @cfg(target_os = "linux") {
+        const data: String = text.file("/proc/meminfo");
+        if (data.is_empty() || !data.contains("SwapTotal:")) { ret String.new(); }
+        const total: u64 = memory_kib(data.as_str(), "SwapTotal:");
+        const free: u64 = memory_kib(data.as_str(), "SwapFree:");
+        var used: u64 = 0;
+        if (free <= total) { used = total - free; }
+        ret text.utilization(used * 1024, total * 1024);
+    }
+    String.new()
+}
+
+pub fn value() String { swap() }

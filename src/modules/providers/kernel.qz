@@ -1,0 +1,35 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import std.core;
+import text;
+
+fn kernel() String {
+    @cfg(target_os = "linux") {
+        const release = text.file("/proc/sys/kernel/osrelease");
+        if (release.is_empty()) { ret String.new(); }
+        ret text.join("Linux ", release.as_str());
+    }
+    @cfg(target_os = "netbsd") { ret netbsd_kernel_name(text.file("/kern/version").as_str()); }
+    @cfg(target_os = "windows") {
+        const build: u32 = core.windows_build();
+        if (build == 0) { ret String.new(); }
+        const n: String = build.to_string();
+        const prefix: String = String.from("Windows NT build ");
+        ret prefix.push_str(n.as_str());
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_kernel_name(raw: str) String {
+    const line = text.first_line(raw);
+    const build = line.find(": ");
+    if (build.is_some() && line.contains(" #")) {
+        ret text.byte_slice(line.as_str(), 0, build.unwrap());
+    }
+    line
+}
+
+pub fn value() String { kernel() }

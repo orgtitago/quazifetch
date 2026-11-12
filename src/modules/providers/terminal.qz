@@ -1,0 +1,116 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+import commands;
+import session;
+
+fn terminal_name() String {
+    const termux = os.env("TERMUX_VERSION", "");
+    const prefix = os.env("PREFIX", "");
+    if (!termux.is_empty() || prefix.contains("com.termux")) { ret String.from("Termux"); }
+    const program = os.env("TERM_PROGRAM", "");
+    if (!program.is_empty()) { ret program; }
+    @cfg(target_os = "netbsd") {
+        ret netbsd_terminal_name();
+    }
+    const detected: String = os.terminal();
+    if (detected.as_str() == "unknown" || detected.as_str().contains("xterm-")) { ret String.new(); }
+    detected
+}
+
+fn terminal_version(name: str) String {
+    if (name == "foot" || name == "kitty" || name == "alacritty" ||
+        name == "wezterm" || name == "konsole" || name == "xterm") {
+        ret commands.version(name, "--version");
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_parent_id(status: str) i32 {
+    // NetBSD procfs status: comm pid ppid pgrp ...
+    const raw = text.word(status, 2);
+    const parsed = raw.as_str().parse[i32]();
+    if (parsed.is_err()) { ret 0; }
+    const pid = parsed.unwrap();
+    if (pid <= 1) { ret 0; }
+    pid
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_process(comm: str) String {
+    const name = text.basename(comm);
+    if (name.as_str() == "alacritty") { ret String.from("alacritty"); }
+    if (name.as_str() == "xterm" || name.as_str() == "uxterm") { ret String.from("xterm"); }
+    if (name.as_str() == "kitty") { ret String.from("kitty"); }
+    if (name.as_str() == "foot" || name.as_str() == "footclient") { ret String.from("foot"); }
+    if (name.as_str() == "wezterm-gui") { ret String.from("wezterm"); }
+    if (name.as_str() == "konsole") { ret String.from("konsole"); }
+    if (name.as_str() == "xfce4-terminal" || name.as_str() == "mate-terminal" ||
+        name.as_str() == "gnome-terminal" || name.as_str() == "qterminal" ||
+        name.as_str() == "st" || name.as_str() == "urxvt" || name.as_str() == "rxvt" ||
+        name.as_str() == "terminator" || name.as_str() == "ghostty" ||
+        name.as_str() == "tilix" || name.as_str() == "sakura" || name.as_str() == "lxterminal") {
+        ret name;
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_ancestors() String {
+    var pid = os.getppid();
+        var depth: usize = 0;
+        for (pid > 1 && depth < 12) {
+            const path = text.join(text.join("/proc/", pid.to_string().as_str()).as_str(), "/status");
+            const status = text.file(path.as_str());
+            if (status.is_empty()) { break; }
+            const comm = text.word(status.as_str(), 0);
+            const terminal = netbsd_terminal_process(comm.as_str());
+            if (!terminal.is_empty()) { ret terminal; }
+            const next = netbsd_parent_id(status.as_str());
+            if (next <= 1 || next == pid) { break; }
+            pid = next;
+            depth++;
+        }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_env() String {
+    if (!os.env("ALACRITTY_SOCKET", "").is_empty() ||
+        !os.env("ALACRITTY_LOG", "").is_empty()) {
+        ret String.from("alacritty");
+    }
+    if (!os.env("KITTY_WINDOW_ID", "").is_empty()) { ret String.from("kitty"); }
+    if (!os.env("WEZTERM_PANE", "").is_empty()) { ret String.from("wezterm"); }
+    if (!os.env("GHOSTTY_RESOURCES_DIR", "").is_empty()) { ret String.from("ghostty"); }
+    if (!os.env("KONSOLE_VERSION", "").is_empty()) { ret String.from("konsole"); }
+    const term = os.env("TERM", "");
+    // TERM describes a terminal capability set, not necessarily the emulator.
+    if (term.as_str() == "alacritty" || term.as_str() == "kitty" || term.as_str() == "foot" ||
+        term.as_str() == "wezterm" || term.as_str() == "ghostty") {
+        ret term;
+    }
+    String.new()
+}
+
+@cfg(target_os = "netbsd")
+fn netbsd_terminal_name() String {
+    // A running process is more reliable than a possibly inherited marker.
+    const ancestor = netbsd_terminal_ancestors();
+    if (!ancestor.is_empty()) { ret ancestor; }
+    netbsd_terminal_env()
+}
+
+pub fn value() String {
+    const name = terminal_name();
+    if (name.is_empty()) { ret String.new(); }
+    if (name.as_str() == "Termux") {
+        const release = os.env("TERMUX_VERSION", "");
+        ret session.compose(name.as_str(), release.as_str(), false);
+    }
+    const version = terminal_version(name.as_str());
+    session.compose(name.as_str(), version.as_str(), false)
+}

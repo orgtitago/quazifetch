@@ -1,0 +1,11 @@
+// Copyright (c) 2026 titago
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import std.os;
+import text;
+
+pub fn value() String {
+    const configured: String = os.env("TZ", "");
+    if (!configured.is_empty()) { ret configured; }
+    text.file("/etc/timezone")
+}

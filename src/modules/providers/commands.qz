@@ -4,7 +4,6 @@
 // Capture command output without going through a shell.
 import std.core;
 import std.unix;
-import std.process;
 import std.os;
 import std.time;
 import text;
@@ -61,23 +60,141 @@ pub fn monotonic_ms() u64 {
     0
 }
 
-// A child may keep stdout open indefinitely. Poll until the deadline,
-// then terminate and reap it.
+// Exec directly in the child so the parent's stdout is never redirected.
+// The environment is copied before fork and inherited without shell parsing.
+fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
+               input: i32, output: i32) i32 {
+    @cfg(target_os = "linux") {
+        const capacity: usize = 262144;
+        var environment: *u8 = 0;
+        unsafe { environment = core.malloc(capacity + 1); }
+        if (environment == 0) { ret -1; }
+        var envfd: i32 = -1;
+        unsafe { envfd = unix.open("/proc/self/environ", 0, 0); }
+        if (envfd < 0) {
+            unsafe { core.free(environment); }
+            ret -1;
+        }
+        var length: usize = 0;
+        for (length < capacity) {
+            var count: isize = -1;
+            unsafe { count = unix.read(envfd, environment + length, capacity - length); }
+            if (count == -4) { continue; }
+            if (count < 0) { length = capacity; break; }
+            if (count == 0) { break; }
+            length += count as usize;
+        }
+        close_fd(envfd);
+        if (length >= capacity) {
+            unsafe { core.free(environment); }
+            ret -1;
+        }
+        unsafe { *(environment + length) = 0; }
+        var entries: usize = 0;
+        var scan: usize = 0;
+        for (scan < length) {
+            var c: u8 = 0;
+            unsafe { c = *(environment + scan); }
+            if (c == 0) { entries++; }
+            scan++;
+        }
+        var pointers: *u8 = 0;
+        var arguments: *u8 = 0;
+        unsafe {
+            pointers = core.malloc((entries + 2) * 8);
+            arguments = core.malloc(5 * 8);
+        }
+        if (pointers == 0 || arguments == 0) {
+            unsafe {
+                core.free(environment);
+                if (pointers != 0) { core.free(pointers); }
+                if (arguments != 0) { core.free(arguments); }
+            }
+            ret -1;
+        }
+        entries = 0;
+        var offset: usize = 0;
+        for (offset < length) {
+            unsafe {
+                *((pointers + entries * 8) as **u8) = environment + offset;
+            }
+            entries++;
+            for (offset < length) {
+                var c: u8 = 0;
+                unsafe { c = *(environment + offset); }
+                offset++;
+                if (c == 0) { break; }
+            }
+        }
+        unsafe {
+            *((pointers + entries * 8) as **u8) = 0;
+            *((arguments + 0) as **u8) = core.str_as_ptr(path);
+        }
+        var n: usize = 1;
+        if (arg1 != "") {
+            unsafe { *((arguments + n * 8) as **u8) = core.str_as_ptr(arg1); }
+            n++;
+        }
+        if (arg2 != "") {
+            unsafe { *((arguments + n * 8) as **u8) = core.str_as_ptr(arg2); }
+            n++;
+        }
+        if (arg3 != "") {
+            unsafe { *((arguments + n * 8) as **u8) = core.str_as_ptr(arg3); }
+            n++;
+        }
+        unsafe { *((arguments + n * 8) as **u8) = 0; }
+        var pid: i32 = -1;
+        unsafe { pid = unix.fork(); }
+        if (pid == 0) {
+            unsafe {
+                close_fd(input);
+                if (unix.dup2(output, 1) < 0) { unix.exit(127); }
+                close_fd(output);
+                const nullfd: i32 = unix.open("/dev/null", 1, 0);
+                if (nullfd >= 0) {
+                    unix.dup2(nullfd, 2);
+                    close_fd(nullfd);
+                }
+                unix.execve(path, arguments, pointers);
+                unix.exit(127);
+            }
+        }
+        unsafe { core.free(environment); core.free(pointers); core.free(arguments); }
+        ret pid;
+    }
+    -1
+}
+
+fn finish_child(pid: i32, terminate: bool) bool {
+    @cfg(target_os = "linux") {
+        if (terminate) { unsafe { unix.kill(pid, 9); } }
+        var status: u32 = 0;
+        var observed: i32 = -1;
+        for (true) {
+            unsafe { observed = unix.wait4(pid, &status, 0, 0); }
+            if (observed != -4) { break; }
+        }
+        ret observed == pid && (status & 127) == 0 && ((status >> 8) & 255) == 0;
+    }
+    false
+}
+
+// Bound both output size and elapsed time, even if stdout closes early.
 pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms: u64) String {
     @cfg(target_os = "linux") {
         if (timeout_ms == 0) { ret String.new(); }
-        const executable_path = executable(program);
-        if (executable_path.is_empty()) { ret String.new(); }
-        var argv: Array[str] = Array.new();
-        if (arg1 != "") { argv.push(arg1); }
-        if (arg2 != "") { argv.push(arg2); }
-        if (arg3 != "") { argv.push(arg3); }
+        const path = executable(program);
+        if (path.is_empty()) { ret String.new(); }
         var fds: *u8 = 0;
         unsafe { fds = core.malloc(8); }
         if (fds == 0) { ret String.new(); }
         var opened: i32 = -1;
-        unsafe { opened = unix.pipe2(fds, 524288); } // O_CLOEXEC
-        if (opened < 0) { unsafe { core.free(fds); } ret String.new(); }
+        unsafe { opened = unix.pipe2(fds, 524288); }
+        if (opened < 0) {
+            unsafe { core.free(fds); }
+            ret String.new();
+        }
         var input: i32 = -1;
         var output: i32 = -1;
         unsafe {
@@ -85,36 +202,11 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
             output = *((fds + 4) as *i32);
             core.free(fds);
         }
-        const started: u64 = monotonic_ms();
+        const started = monotonic_ms();
         if (started == 0) { close_fd(input); close_fd(output); ret String.new(); }
-        var saved: i32 = -1;
-        unsafe { saved = unix.dup(1); }
-        var redirected: i32 = -1;
-        if (saved >= 0) { unsafe { redirected = unix.dup2(output, 1); } }
-        if (saved < 0 || redirected < 0) {
-            if (saved >= 0) { close_fd(saved); }
-            close_fd(input);
-            close_fd(output);
-            ret String.new();
-        }
-        var saved_error: i32 = -1;
-        var devnull: i32 = -1;
-        unsafe {
-            saved_error = unix.dup(2);
-            devnull = unix.open("/dev/null", 1, 0);
-            if (saved_error >= 0 && devnull >= 0) { unix.dup2(devnull, 2); }
-        }
-        const launched = process.spawn(executable_path.as_str(), argv);
-        unsafe {
-            unix.dup2(saved, 1);
-            if (saved_error >= 0) { unix.dup2(saved_error, 2); }
-        }
-        if (saved_error >= 0) { close_fd(saved_error); }
-        if (devnull >= 0) { close_fd(devnull); }
-        close_fd(saved);
+        const pid = spawn_piped(path.as_str(), arg1, arg2, arg3, input, output);
         close_fd(output);
-        if (launched.is_err()) { close_fd(input); ret String.new(); }
-        var child = launched.unwrap();
+        if (pid <= 0) { close_fd(input); ret String.new(); }
         const max_output: usize = 2097152;
         var buffer: *u8 = 0;
         var ready: *u8 = 0;
@@ -126,69 +218,60 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
             if (buffer != 0) { unsafe { core.free(buffer); } }
             if (ready != 0) { unsafe { core.free(ready); } }
             close_fd(input);
-            const closed = child.close();
+            finish_child(pid, true);
             ret String.new();
         }
         unsafe {
             *(ready as *i32) = input;
-            *((ready + 4) as *i32) = 1; // POLLIN (short), revents = 0
+            *((ready + 4) as *i32) = 1;
         }
         var used: usize = 0;
-        var finished_reading: bool = false;
-        var bad_output: bool = false;
-        for (!finished_reading && used < max_output) {
-            var wait_ms: i32 = 100;
-            const now: u64 = monotonic_ms();
-            if (now == 0 || now - started >= timeout_ms) { bad_output = true; break; }
-            const remaining: u64 = timeout_ms - (now - started);
-            if (remaining < 100) { wait_ms = remaining as i32; }
+        var finished: bool = false;
+        var bad: bool = false;
+        for (!finished && used < max_output) {
+            const now = monotonic_ms();
+            if (now < started || now - started >= timeout_ms) { bad = true; break; }
+            const remaining = timeout_ms - (now - started);
+            const delay: i32 = if (remaining < 100) { remaining as i32 } else { 100 };
             var polled: i32 = -1;
-            unsafe { polled = unix.poll(ready, 1, wait_ms); }
-            if (polled == -4) { continue; } // EINTR
-            if (polled < 0) { bad_output = true; break; }
+            unsafe { polled = unix.poll(ready, 1, delay); }
+            if (polled == -4) { continue; }
+            if (polled < 0) { bad = true; break; }
             if (polled == 0) { continue; }
             var n: isize = -1;
             unsafe { n = unix.read(input, buffer + used, max_output - used); }
             if (n == -4) { continue; }
-            if (n < 0) { bad_output = true; break; }
-            if (n == 0) { finished_reading = true; break; }
+            if (n < 0) { bad = true; break; }
+            if (n == 0) { finished = true; break; }
             used += n as usize;
         }
-        if (used == max_output) { bad_output = true; }
+        if (used == max_output) { bad = true; }
         close_fd(input);
         unsafe { core.free(ready); }
-        if (bad_output || !finished_reading) {
-            const stopped = child.close();
+        if (bad || !finished) {
+            finish_child(pid, true);
             unsafe { core.free(buffer); }
             ret String.new();
         }
-        // A process may close stdout and continue running. Keep the deadline.
-        var complete: bool = false;
         var success: bool = false;
+        var complete: bool = false;
         for (!complete) {
-            const exited = child.try_wait();
-            if (exited.is_err()) { break; }
-            const observed = exited.unwrap();
-            if (observed.is_some()) {
-                const status = observed.unwrap();
-                success = match status {
-                    Code(value) => value == 0,
-                    Signal(_) => false,
-                };
+            var status: u32 = 0;
+            var observed: i32 = -1;
+            unsafe { observed = unix.wait4(pid, &status, 1, 0); }
+            if (observed == pid) {
+                success = (status & 127) == 0 && ((status >> 8) & 255) == 0;
                 complete = true;
                 break;
             }
-            const now: u64 = monotonic_ms();
-            if (now == 0 || now - started >= timeout_ms) { break; }
+            if (observed < 0 && observed != -4) { break; }
+            const now = monotonic_ms();
+            if (now < started || now - started >= timeout_ms) { break; }
             time.sleep(time.Duration.from_milliseconds(10));
         }
-        if (!complete) {
-            const stopped = child.close();
-            unsafe { core.free(buffer); }
-            ret String.new();
-        }
-        var value: String = String.new();
-        if (used > 0 && success) {
+        if (!complete) { finish_child(pid, true); }
+        var value = String.new();
+        if (success && used > 0) {
             unsafe {
                 *(buffer + used) = 0;
                 value = String.from(core.str_from_ptr(buffer));
