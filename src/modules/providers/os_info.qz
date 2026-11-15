@@ -13,8 +13,8 @@ fn android_release() String {
         ret String.new();
     }
     var result = String.from("Android ");
-    result = result.push_str(release.as_str());
-    if (!os.env("TERMUX_VERSION", "").is_empty()) { result = result.push_str(" (Termux)"); }
+    result.push_str(release.as_str());
+    if (!os.env("TERMUX_VERSION", "").is_empty()) { result.push_str(" (Termux)"); }
     result
 }
 

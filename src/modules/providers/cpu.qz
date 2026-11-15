@@ -37,21 +37,21 @@ fn cpu() String {
                 }
                 const threads_count: String = threads();
                 if (!threads_count.is_empty()) {
-                    clean = clean.push_str(" (");
-                    clean = clean.push_str(threads_count.as_str());
-                    clean = clean.push_str(")");
+                    clean.push_str(" (");
+                    clean.push_str(threads_count.as_str());
+                    clean.push_str(")");
                 }
                 var ghz: u64 = khz / 1000000;
                 var frac: u64 = ((khz % 1000000) * 100 + 500000) / 1000000;
                 if (frac >= 100) { ghz++; frac = 0; }
                 const whole: String = ghz.to_string();
-                clean = clean.push_str(" @ ");
-                clean = clean.push_str(whole.as_str());
-                clean = clean.push_str(".");
-                if (frac < 10) { clean = clean.push_str("0"); }
+                clean.push_str(" @ ");
+                clean.push_str(whole.as_str());
+                clean.push_str(".");
+                if (frac < 10) { clean.push_str("0"); }
                 const fraction: String = frac.to_string();
-                clean = clean.push_str(fraction.as_str());
-                ret clean.push_str(" GHz");
+                clean.push_str(fraction.as_str());
+                var pushed: String = clean; pushed.push_str(" GHz"); ret pushed;
             }
         }
     }

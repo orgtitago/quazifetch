@@ -19,12 +19,12 @@ fn uptime() String {
         var result: String = String.new();
         if (days > 0) {
             const day: String = days.to_string();
-            result = result.push_str(day.as_str());
-            if (days == 1) { result = result.push_str(" day, "); }
-            else { result = result.push_str(" days, "); }
+            result.push_str(day.as_str());
+            if (days == 1) { result.push_str(" day, "); }
+            else { result.push_str(" days, "); }
         }
         const hm = text.hours_minutes(hours, minutes, days > 0);
-        ret result.push_str(hm.as_str());
+        var pushed: String = result; pushed.push_str(hm.as_str()); ret pushed;
     }
     @cfg(target_os = "netbsd") {
         ret netbsd_uptime_from(text.file("/kern/time").as_str(),
@@ -61,11 +61,12 @@ fn netbsd_uptime_from(now_raw: str, boot_raw: str) String {
     var result = String.new();
     if (days > 0) {
         result = days.to_string();
-        if (days == 1) { result = result.push_str(" day, "); }
-        else { result = result.push_str(" days, "); }
+        if (days == 1) { result.push_str(" day, "); }
+        else { result.push_str(" days, "); }
     }
     const clock = text.hours_minutes(hours, minutes, days > 0);
-    result.push_str(clock.as_str())
+    result.push_str(clock.as_str());
+    result
 }
 
 pub fn value() String { uptime() }

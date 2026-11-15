@@ -17,7 +17,7 @@ fn kernel() String {
         if (build == 0) { ret String.new(); }
         const n: String = build.to_string();
         const prefix: String = String.from("Windows NT build ");
-        ret prefix.push_str(n.as_str());
+        var pushed: String = prefix; pushed.push_str(n.as_str()); ret pushed;
     }
     String.new()
 }

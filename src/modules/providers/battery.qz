@@ -37,17 +37,18 @@ fn battery_label() String {
     const model = text.file(text.join(path.as_str(), "/model_name").as_str());
     if (model.is_empty()) { ret String.from("Battery"); }
     var label = String.from("Battery (");
-    label = label.push_str(model.as_str());
-    label.push_str(")")
+    label.push_str(model.as_str());
+    label.push_str(")");
+    label
 }
 
 fn battery() String {
     @cfg(target_os = "netbsd") { ret netbsd_battery_from(text.boot_log().as_str()); }
     const path = battery_device();
     if (path.is_empty()) { ret String.new(); }
-    const capacity = text.file(text.join(path.as_str(), "/capacity").as_str());
+    var capacity = text.file(text.join(path.as_str(), "/capacity").as_str());
     if (capacity.is_empty()) { ret String.new(); }
-    var result = capacity.push_str("%");
+    var result: String = String.from(capacity.as_str()); result.push_str("%");
     const state = text.file(text.join(path.as_str(), "/status").as_str());
     if (state.as_str() == "Discharging") {
         var remaining = battery_value(path.as_str(), "/energy_now");
@@ -61,16 +62,16 @@ fn battery() String {
             const minutes: u64 = (remaining * 60 + rate / 2) / rate;
             if (minutes > 0 && minutes <= 2880) {
                 const h = text.hours_minutes(minutes / 60, minutes % 60, false);
-                result = result.push_str(" (");
-                result = result.push_str(h.as_str());
-                result = result.push_str(" remaining)");
+                result.push_str(" (");
+                result.push_str(h.as_str());
+                result.push_str(" remaining)");
             }
         }
     }
     if (!state.is_empty() && state.as_str() != "Unknown") {
-        result = result.push_str(" [");
-        result = result.push_str(state.as_str());
-        result = result.push_str("]");
+        result.push_str(" [");
+        result.push_str(state.as_str());
+        result.push_str("]");
     }
     result
 }

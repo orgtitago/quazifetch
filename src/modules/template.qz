@@ -18,29 +18,32 @@ fn header() String {
     if (username.is_empty()) { ret hostname; }
     if (hostname.is_empty()) { ret username; }
     var result = String.from(username.as_str());
-    result = result.push_str("@");
-    result.push_str(hostname.as_str())
+    result.push_str("@");
+    result.push_str(hostname.as_str());
+    result
 }
 
 fn styled_header(user: str, host: str, use_color: bool) String {
     var plain = String.from(user);
     if (user == "") { plain = String.from(host); }
-    else if (host != "") { plain = plain.push_str("@").push_str(host); }
+    else if (host != "") { plain.push_str("@"); plain.push_str(host); }
     if (!use_color || user == "" || host == "") { ret accent(plain.as_str(), use_color); }
     var result = String.from(config.label_color());
-    result = result.push_str(user);
-    result = result.push_str(config.value_color());
-    result = result.push_str("@");
-    result = result.push_str(config.label_color());
-    result = result.push_str(host);
-    result.push_str("\e[0m")
+    result.push_str(user);
+    result.push_str(config.value_color());
+    result.push_str("@");
+    result.push_str(config.label_color());
+    result.push_str(host);
+    result.push_str("\e[0m");
+    result
 }
 
 fn accent(value: str, use_color: bool) String {
     if (!use_color) { ret String.from(value); }
     var result = String.from(config.label_color());
-    result = result.push_str(value);
-    result.push_str("\e[0m")
+    result.push_str(value);
+    result.push_str("\e[0m");
+    result
 }
 
 fn percentage_color(value: u64) str {
@@ -66,24 +69,25 @@ fn highlight_percentages(value: str, use_color: bool) String {
             }
             if (from < i) {
                 const prefix = txt.byte_slice(value, segment, from);
-                output = output.push_str(prefix.as_str());
+                output.push_str(prefix.as_str());
                 var percent: u64 = 0;
                 var j: usize = from;
                 for (j < i) {
                     percent = percent * 10 + (core.str_byte_at(value, j) - 48) as u64;
                     j++;
                 }
-                output = output.push_str(percentage_color(percent));
+                output.push_str(percentage_color(percent));
                 const number = txt.byte_slice(value, from, i + 1);
-                output = output.push_str(number.as_str());
-                output = output.push_str(config.value_color());
+                output.push_str(number.as_str());
+                output.push_str(config.value_color());
                 segment = i + 1;
             }
         }
         i++;
     }
     const tail = txt.byte_slice(value, segment, length);
-    output.push_str(tail.as_str())
+    output.push_str(tail.as_str());
+    output
 }
 
 pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
@@ -101,11 +105,11 @@ pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
         if (name.is_empty()) { ret Rendered { text: String.new(), available: false }; }
         var underline = String.new();
         var i: usize = 0;
-        for (i < name.bytes_len() + 2) { underline = underline.push_str("-"); i++; }
+        for (i < name.bytes_len() + 2) { underline.push_str("-"); i++; }
         if (use_color) {
             var styled = String.from(config.value_color());
-            styled = styled.push_str(underline.as_str());
-            styled = styled.push_str("\e[0m");
+            styled.push_str(underline.as_str());
+            styled.push_str("\e[0m");
             ret Rendered { text: styled, available: true };
         }
         ret Rendered { text: underline, available: true };
@@ -114,8 +118,8 @@ pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
     if (key == "os" && !value.is_empty()) {
         const arch = registry.lookup("arch");
         if (!arch.is_empty()) {
-            value = value.push_str(" ");
-            value = value.push_str(arch.as_str());
+            value.push_str(" ");
+            value.push_str(arch.as_str());
         }
     }
     if (value.is_empty() && !show_missing) {
@@ -125,13 +129,13 @@ pub fn render(key: str, use_color: bool, show_missing: bool) Rendered {
     const label = labels.for_key(key);
     if (label.is_empty()) { ret Rendered { text: String.new(), available: false }; }
     var output = String.new();
-    if (use_color) { output = output.push_str(config.label_color()); }
-    output = output.push_str(label.as_str());
-    output = output.push_str(": ");
-    if (use_color) { output = output.push_str(config.value_color()); }
+    if (use_color) { output.push_str(config.label_color()); }
+    output.push_str(label.as_str());
+    output.push_str(": ");
+    if (use_color) { output.push_str(config.value_color()); }
     const value_text = highlight_percentages(value.as_str(), use_color);
-    output = output.push_str(value_text.as_str());
-    if (use_color) { output = output.push_str("\e[0m"); }
+    output.push_str(value_text.as_str());
+    if (use_color) { output.push_str("\e[0m"); }
     Rendered { text: output, available: true }
 }
 

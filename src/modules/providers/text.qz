@@ -6,7 +6,7 @@ import std.fs;
 import std.os;
 
 pub fn file(path: str) String {
-    const result = fs.read_to_string_with_limit(path, 2097152);
+    var result = fs.read_to_string_with_limit(path, 2097152);
     if (result.is_err()) { ret String.new(); }
     const contents: String = result.unwrap();
     contents.trim()
@@ -113,14 +113,15 @@ pub fn count_lines(data: str, prefix: str) usize {
 
 
 pub fn join(left: str, right: str) String {
-    const prefix: String = String.from(left);
-    prefix.push_str(right)
+    var prefix: String = String.from(left);
+    prefix.push_str(right);
+    prefix
 }
 
 pub fn count_directory(path: str) usize {
-    const count = fs.count_entries(path);
-    if (count.is_err()) { ret 0; }
-    count.unwrap()
+    const listed = fs.read_dir(path);
+    if (listed.is_err()) { ret 0; }
+    listed.unwrap().len()
 }
 
 pub fn human_bytes(value: u64) String {
@@ -129,30 +130,32 @@ pub fn human_bytes(value: u64) String {
     var suffix: str = " GiB";
     if (value < unit) { unit = 1048576; suffix = " MiB"; }
     if (value < unit) { unit = 1024; suffix = " KiB"; }
-    if (value < unit) { ret value.to_string().push_str(" B"); }
+    if (value < unit) { var pushed: String = value.to_string(); pushed.push_str(" B"); ret pushed; }
     var whole: u64 = value / unit;
     var fraction: u64 = ((value % unit) * 100 + unit / 2) / unit;
     if (fraction >= 100) { whole++; fraction = 0; }
     const lead: String = whole.to_string();
     var output: String = String.from(lead.as_str());
-    output = output.push_str(".");
-    if (fraction < 10) { output = output.push_str("0"); }
+    output.push_str(".");
+    if (fraction < 10) { output.push_str("0"); }
     const tail: String = fraction.to_string();
-    output = output.push_str(tail.as_str());
-    output.push_str(suffix)
+    output.push_str(tail.as_str());
+    output.push_str(suffix);
+    output
 }
 
 pub fn hours_minutes(hours: u64, minutes: u64, show_zero_hours: bool) String {
     var output = String.new();
     if (hours > 0 || show_zero_hours) {
         output = hours.to_string();
-        if (hours == 1) { output = output.push_str(" hour, "); }
-        else { output = output.push_str(" hours, "); }
+        if (hours == 1) { output.push_str(" hour, "); }
+        else { output.push_str(" hours, "); }
     }
     const m = minutes.to_string();
-    output = output.push_str(m.as_str());
-    if (minutes == 1) { ret output.push_str(" min"); }
-    output.push_str(" mins")
+    output.push_str(m.as_str());
+    if (minutes == 1) { var pushed: String = output; pushed.push_str(" min"); ret pushed; }
+    output.push_str(" mins");
+    output
 }
 
 pub fn utilization(used: u64, total: u64) String {
@@ -160,15 +163,16 @@ pub fn utilization(used: u64, total: u64) String {
     const a: String = human_bytes(used);
     const b: String = human_bytes(total);
     var result: String = String.from(a.as_str());
-    result = result.push_str(" / ");
-    result = result.push_str(b.as_str());
-    result = result.push_str(" (");
+    result.push_str(" / ");
+    result.push_str(b.as_str());
+    result.push_str(" (");
     // Divide first to keep the intermediate value in range.
     const percentage: u64 = (used / total) * 100 +
         (((used % total) * 100 + total / 2) / total);
     const number: String = percentage.to_string();
-    result = result.push_str(number.as_str());
-    result.push_str("%)")
+    result.push_str(number.as_str());
+    result.push_str("%)");
+    result
 }
 
 pub fn count_occurrences(data: str, needle: str) usize {

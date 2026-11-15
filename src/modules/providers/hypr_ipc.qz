@@ -27,14 +27,15 @@ fn socket_path() String {
     var root = os.env("XDG_RUNTIME_DIR", "");
     if (root.is_empty()) { ret String.new(); }
     var path = text.join(root.as_str(), "/hypr/");
-    path = path.push_str(signature.as_str());
-    path.push_str("/.socket.sock")
+    path.push_str(signature.as_str());
+    path.push_str("/.socket.sock");
+    path
 }
 
 // Keep the socket nonblocking and bound the exchange by a deadline.
 pub fn request(message: str) String {
     @cfg(target_os = "linux") {
-        const path = socket_path();
+        var path = socket_path();
         if (path.is_empty() || path.bytes_len() > 107) { ret String.new(); }
         var fd: i32 = -1;
         unsafe { fd = unix.socket(1, 1 | 2048 | 524288, 0); } // SOCK_STREAM | NONBLOCK | CLOEXEC

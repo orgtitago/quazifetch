@@ -41,17 +41,18 @@ unsafe fn edid_code(raw: *u8) String {
     var code: String = text.byte_slice(alphabet, (a - 1) as usize, a as usize);
     const second: String = text.byte_slice(alphabet, (b - 1) as usize, b as usize);
     const third: String = text.byte_slice(alphabet, (c - 1) as usize, c as usize);
-    code = code.push_str(second.as_str());
-    code = code.push_str(third.as_str());
+    code.push_str(second.as_str());
+    code.push_str(third.as_str());
     const product: u64 = read_byte(raw, 10) | (read_byte(raw, 11) << 8);
     const d0 = hex_digit((product >> 12) & 15);
     const d1 = hex_digit((product >> 8) & 15);
     const d2 = hex_digit((product >> 4) & 15);
     const d3 = hex_digit(product & 15);
-    code = code.push_str(d0.as_str());
-    code = code.push_str(d1.as_str());
-    code = code.push_str(d2.as_str());
-    code.push_str(d3.as_str())
+    code.push_str(d0.as_str());
+    code.push_str(d1.as_str());
+    code.push_str(d2.as_str());
+    code.push_str(d3.as_str());
+    code
 }
 
 fn integer_sqrt(n: u64) u64 {
@@ -183,11 +184,12 @@ fn fallback_framebuffer() String {
     const x = width.unwrap();
     const y = height.unwrap();
     if (x == 0 || y == 0 || x > 16384 || y > 16384) { ret String.new(); }
-    const first = x.to_string();
+    var first = x.to_string();
     const second = y.to_string();
-    var result = first.push_str("x");
-    result = result.push_str(second.as_str());
-    result.push_str(" [Framebuffer]")
+    var result: String = String.from(first.as_str()); result.push_str("x");
+    result.push_str(second.as_str());
+    result.push_str(" [Framebuffer]");
+    result
 }
 
 pub fn label() String {
@@ -199,8 +201,9 @@ pub fn label() String {
         ret String.from("Display");
     }
     var result: String = String.from("Display (");
-    result = result.push_str(current.name.as_str());
-    result.push_str(")")
+    result.push_str(current.name.as_str());
+    result.push_str(")");
+    result
 }
 
 pub fn value() String {
@@ -225,28 +228,28 @@ pub fn value() String {
     const width = current.width.to_string();
     const height = current.height.to_string();
     var value: String = String.from(width.as_str());
-    value = value.push_str("x");
-    value = value.push_str(height.as_str());
+    value.push_str("x");
+    value.push_str(height.as_str());
     if (!active.scale.is_empty()) {
-        value = value.push_str(" @ ");
-        value = value.push_str(active.scale.as_str());
-        value = value.push_str("x");
+        value.push_str(" @ ");
+        value.push_str(active.scale.as_str());
+        value.push_str("x");
     }
     if (current.diagonal > 0) {
         const diagonal = current.diagonal.to_string();
-        value = value.push_str(" in ");
-        value = value.push_str(diagonal.as_str());
-        value = value.push_str("\"");
+        value.push_str(" in ");
+        value.push_str(diagonal.as_str());
+        value.push_str("\"");
     }
     if (current.hz > 0) {
         const refresh = current.hz.to_string();
-        value = value.push_str(", ");
-        value = value.push_str(refresh.as_str());
-        value = value.push_str(" Hz");
+        value.push_str(", ");
+        value.push_str(refresh.as_str());
+        value.push_str(" Hz");
     }
     // eDP, LVDS and DSI are internal connector types.
     if (connector_path.contains("-eDP-") || connector_path.contains("-LVDS-") || connector_path.contains("-DSI-")) {
-        value = value.push_str(" [Built-in]");
+        value.push_str(" [Built-in]");
     }
     value
 }

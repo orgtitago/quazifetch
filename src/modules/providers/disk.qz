@@ -80,8 +80,8 @@ pub fn root_usage() String {
         var filesystem = String.new();
         if (target.as_str() == "/") { filesystem = root_fs(); }
         if (!filesystem.is_empty()) {
-            result = result.push_str(" - ");
-            result = result.push_str(filesystem.as_str());
+            result.push_str(" - ");
+            result.push_str(filesystem.as_str());
         }
         ret result;
     }

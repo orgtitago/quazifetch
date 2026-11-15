@@ -19,17 +19,19 @@ fn source_file(path: str) String {
 fn amount(count: usize, source: str) String {
     if (count == 0) { ret String.new(); }
     var part: String = count.to_string();
-    part = part.push_str(" (");
-    part = part.push_str(source);
-    part.push_str(")")
+    part.push_str(" (");
+    part.push_str(source);
+    part.push_str(")");
+    part
 }
 
 fn add(output: String, count: usize, source: str) String {
     if (count == 0) { ret output; }
     var result: String = output;
-    if (!result.is_empty()) { result = result.push_str(", "); }
-    const part: String = amount(count, source);
-    result.push_str(part.as_str())
+    if (!result.is_empty()) { result.push_str(", "); }
+    var part: String = amount(count, source);
+    result.push_str(part.as_str());
+    result
 }
 
 fn rooted(path: str) String {
