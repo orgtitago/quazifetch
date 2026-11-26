@@ -84,7 +84,7 @@ fn netbsd_battery_from(raw: str) String {
         if (text.contains_range(raw, i, i + 7, "acpibat")) {
             var next: usize = i + 7;
             for (next < length) {
-                const c = core.str_byte_at(raw, next);
+                const c = text.byte_at(raw, next);
                 if (c < 48 || c > 57) { break; }
                 next++;
             }

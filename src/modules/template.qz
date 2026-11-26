@@ -60,10 +60,10 @@ fn highlight_percentages(value: str, use_color: bool) String {
     var segment: usize = 0;
     var i: usize = 0;
     for (i < length) {
-        if (core.str_byte_at(value, i) == 37) {
+        if (txt.byte_at(value, i) == 37) {
             var from: usize = i;
             for (from > segment) {
-                const c = core.str_byte_at(value, from - 1);
+                const c = txt.byte_at(value, from - 1);
                 if (c < 48 || c > 57) { break; }
                 from--;
             }
@@ -73,7 +73,7 @@ fn highlight_percentages(value: str, use_color: bool) String {
                 var percent: u64 = 0;
                 var j: usize = from;
                 for (j < i) {
-                    percent = percent * 10 + (core.str_byte_at(value, j) - 48) as u64;
+                    percent = percent * 10 + (txt.byte_at(value, j) - 48) as u64;
                     j++;
                 }
                 output.push_str(percentage_color(percent));

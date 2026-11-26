@@ -76,12 +76,12 @@ fn netbsd_cpu_threads_from(raw: str) String {
     var start: usize = 0;
     var count: u64 = 0;
     for (i <= length) {
-        if (i == length || core.str_byte_at(raw, i) == 10) {
-            if (i > start + 6 && core.str_byte_at(raw, start) == 99 &&
-                core.str_byte_at(raw, start + 1) == 112 && core.str_byte_at(raw, start + 2) == 117) {
+        if (i == length || text.byte_at(raw, i) == 10) {
+            if (i > start + 6 && text.byte_at(raw, start) == 99 &&
+                text.byte_at(raw, start + 1) == 112 && text.byte_at(raw, start + 2) == 117) {
                 var n: usize = start + 3;
                 for (n < i) {
-                    const b = core.str_byte_at(raw, n);
+                    const b = text.byte_at(raw, n);
                     if (b < 48 || b > 57) { break; }
                     n++;
                 }

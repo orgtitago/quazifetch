@@ -41,36 +41,36 @@ fn pci_name_from_db(data: str, vendor_id: str, device_id: str) String {
     var vendor_name: String = String.new();
     for (pos < length) {
         var end: usize = pos;
-        for (end < length && core.str_byte_at(data, end) != 10) { end++; }
+        for (end < length && text.byte_at(data, end) != 10) { end++; }
         const size: usize = end - pos;
-        if (size > 5 && core.str_byte_at(data, pos) != 9 &&
-            core.str_byte_at(data, pos) != 35 && core.str_byte_at(data, pos) != 32) {
+        if (size > 5 && text.byte_at(data, pos) != 9 &&
+            text.byte_at(data, pos) != 35 && text.byte_at(data, pos) != 32) {
             if (matched_vendor) { break; }
             var same: bool = true;
             var k: usize = 0;
             for (k < 4) {
-                if (core.str_byte_at(data, pos + k) != core.str_byte_at(vendor_id, k)) {
+                if (text.byte_at(data, pos + k) != text.byte_at(vendor_id, k)) {
                     same = false;
                     break;
                 }
                 k++;
             }
-            if (same && core.str_byte_at(data, pos + 4) == 32) {
+            if (same && text.byte_at(data, pos + 4) == 32) {
                 matched_vendor = true;
                 vendor_name = text.byte_slice(data, pos + 5, end).trim();
             }
-        } else if (matched_vendor && size > 6 && core.str_byte_at(data, pos) == 9 &&
-            core.str_byte_at(data, pos + 1) != 9) {
+        } else if (matched_vendor && size > 6 && text.byte_at(data, pos) == 9 &&
+            text.byte_at(data, pos + 1) != 9) {
             var same_device: bool = true;
             var j: usize = 0;
             for (j < 4) {
-                if (core.str_byte_at(data, pos + 1 + j) != core.str_byte_at(device_id, j)) {
+                if (text.byte_at(data, pos + 1 + j) != text.byte_at(device_id, j)) {
                     same_device = false;
                     break;
                 }
                 j++;
             }
-            if (same_device && core.str_byte_at(data, pos + 5) == 32) {
+            if (same_device && text.byte_at(data, pos + 5) == 32) {
                 const name: String = text.byte_slice(data, pos + 6, end).trim();
                 if (vendor_name.is_empty()) { ret name; }
                 var result: String = String.from(vendor_name.as_str());
@@ -166,7 +166,7 @@ fn netbsd_gpu_from(raw: str) String {
     var start: usize = 0;
     var i: usize = 0;
     for (i <= length) {
-        if (i == length || core.str_byte_at(raw, i) == 10) {
+        if (i == length || text.byte_at(raw, i) == 10) {
             if (text.contains_range(raw, start, i, " at pci") &&
                 (text.contains_range(raw, start, i, "i915drmkms") ||
                  text.contains_range(raw, start, i, "amdgpu") ||

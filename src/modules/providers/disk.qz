@@ -19,17 +19,17 @@ fn root_fs() String {
     var from: usize = 0;
     var i: usize = 0;
     for (i <= length) {
-        if (i == length || core.str_byte_at(data.as_str(), i) == 10) {
+        if (i == length || text.byte_at(data.as_str(), i) == 10) {
             const row: String = text.byte_slice(data.as_str(), from, i);
             const text_value: str = row.as_str();
             const end: usize = core.strlen(text_value);
             var first: usize = 0;
-            for (first < end && core.str_byte_at(text_value, first) != 32) { first++; }
+            for (first < end && text.byte_at(text_value, first) != 32) { first++; }
             var second: usize = first + 1;
-            for (second < end && core.str_byte_at(text_value, second) != 32) { second++; }
-            if (second == first + 2 && core.str_byte_at(text_value, first + 1) == 47) {
+            for (second < end && text.byte_at(text_value, second) != 32) { second++; }
+            if (second == first + 2 && text.byte_at(text_value, first + 1) == 47) {
                 var third: usize = second + 1;
-                for (third < end && core.str_byte_at(text_value, third) != 32) { third++; }
+                for (third < end && text.byte_at(text_value, third) != 32) { third++; }
                 if (third > second + 1) {
                     ret text.byte_slice(text_value, second + 1, third);
                 }

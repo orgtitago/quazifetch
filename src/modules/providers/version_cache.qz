@@ -6,7 +6,7 @@ import std.core;
 import std.fs;
 import text;
 import nix_cache;
-import std.unix;
+import std.linux;
 
 fn location(program: str, create: bool) String {
     var filename = text.join("/version-", program);
@@ -51,7 +51,7 @@ pub fn save(program: str, executable_path: str, value: str) void {
         if (path.is_empty()) { ret; }
         var temporary = text.join(path.as_str(), ".");
         var pid: i32 = 0;
-        unsafe { pid = unix.getpid(); }
+        unsafe { pid = linux.getpid(); }
         temporary.push_str(pid.to_string().as_str());
         const opened = fs.File.create(temporary.as_str());
         if (opened.is_err()) { ret; }

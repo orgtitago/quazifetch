@@ -260,7 +260,7 @@ fn netbsd_framebuffer_from(raw: str) String {
     var start: usize = 0;
     var i: usize = 0;
     for (i <= length) {
-        if (i == length || core.str_byte_at(raw, i) == 10) {
+        if (i == length || text.byte_at(raw, i) == 10) {
             if (text.contains_range(raw, start, i, "framebuffer at") &&
                 text.contains_range(raw, start, i, "size ")) {
                 const line = text.byte_slice(raw, start, i);

@@ -40,7 +40,7 @@ fn wm_version(name: str) String {
             if (point.is_some()) {
                 var from: usize = point.unwrap() + 5;
                 for (from < response.bytes_len()) {
-                    const c = core.str_byte_at(response.as_str(), from);
+                    const c = text.byte_at(response.as_str(), from);
                     if (c >= 48 && c <= 57) { break; }
                     from++;
                 }

@@ -38,7 +38,7 @@ fn netbsd_first_number(raw: str) u64 {
     const length = core.strlen(raw);
     var end: usize = 0;
     for (end < length) {
-        const byte = core.str_byte_at(raw, end);
+        const byte = text.byte_at(raw, end);
         if (byte < 48 || byte > 57) { break; }
         end++;
     }

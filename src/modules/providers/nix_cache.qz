@@ -7,7 +7,7 @@ import std.core;
 import std.fs;
 import std.os;
 import text;
-import std.unix;
+import std.linux;
 
 fn root() String {
     const custom = os.env("XDG_CACHE_HOME", "");
@@ -87,7 +87,7 @@ pub fn save(role: str, profile: str, count: usize) void {
         if (path.is_empty()) { ret; }
         var temporary = text.join(path.as_str(), ".");
         var pid: i32 = 0;
-        unsafe { pid = unix.getpid(); }
+        unsafe { pid = linux.getpid(); }
         temporary.push_str(pid.to_string().as_str());
         const created = fs.File.create(temporary.as_str());
         if (created.is_err()) { ret; }

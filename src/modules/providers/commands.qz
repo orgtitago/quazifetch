@@ -3,17 +3,17 @@
 
 // Capture command output without going through a shell.
 import std.core;
-import std.unix;
+import std.linux;
 import std.os;
 import std.time;
 import text;
 import version_cache;
 
-fn close_fd(fd: i32) void { unsafe { unix.close(fd); } }
+fn close_fd(fd: i32) void { unsafe { linux.close(fd); } }
 
 fn check_executable(path: str) bool {
     var ok: i32 = -1;
-    unsafe { ok = unix.access(path, 1); }
+    unsafe { ok = linux.access(path, 1); }
     ok == 0
 }
 
@@ -24,7 +24,7 @@ pub fn executable(name: str) String {
         var i: usize = 0;
         const length: usize = path.bytes_len();
         for (i <= length) {
-            if (i == length || core.str_byte_at(path.as_str(), i) == 58) {
+            if (i == length || text.byte_at(path.as_str(), i) == 58) {
                 if (i > start) {
                     const dir = text.byte_slice(path.as_str(), start, i);
                     const candidate = text.join(text.join(dir.as_str(), "/").as_str(), name);
@@ -45,7 +45,7 @@ pub fn monotonic_ms() u64 {
         unsafe { buffer = core.malloc(16); }
         if (buffer == 0) { ret 0; }
         var code: i32 = -1;
-        unsafe { code = unix.clock_gettime(1, buffer); }
+        unsafe { code = linux.clock_gettime(1, buffer); }
         if (code != 0) { unsafe { core.free(buffer); } ret 0; }
         var seconds: i64 = 0;
         var nanoseconds: i64 = 0;
@@ -70,7 +70,7 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
         unsafe { environment = core.malloc(capacity + 1); }
         if (environment == 0) { ret -1; }
         var envfd: i32 = -1;
-        unsafe { envfd = unix.open("/proc/self/environ", 0, 0); }
+        unsafe { envfd = linux.open("/proc/self/environ", 0, 0); }
         if (envfd < 0) {
             unsafe { core.free(environment); }
             ret -1;
@@ -78,7 +78,7 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
         var length: usize = 0;
         for (length < capacity) {
             var count: isize = -1;
-            unsafe { count = unix.read(envfd, environment + length, capacity - length); }
+            unsafe { count = linux.read(envfd, environment + length, capacity - length); }
             if (count == -4) { continue; }
             if (count < 0) { length = capacity; break; }
             if (count == 0) { break; }
@@ -145,19 +145,19 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
         }
         unsafe { *((arguments + n * 8) as **u8) = 0; }
         var pid: i32 = -1;
-        unsafe { pid = unix.fork(); }
+        unsafe { pid = linux.fork(); }
         if (pid == 0) {
             unsafe {
                 close_fd(input);
-                if (unix.dup2(output, 1) < 0) { unix.exit(127); }
+                if (linux.dup2(output, 1) < 0) { linux.exit(127); }
                 close_fd(output);
-                const nullfd: i32 = unix.open("/dev/null", 1, 0);
+                const nullfd: i32 = linux.open("/dev/null", 1, 0);
                 if (nullfd >= 0) {
-                    unix.dup2(nullfd, 2);
+                    linux.dup2(nullfd, 2);
                     close_fd(nullfd);
                 }
-                unix.execve(path, arguments, pointers);
-                unix.exit(127);
+                linux.execve(path, arguments, pointers);
+                linux.exit(127);
             }
         }
         unsafe { core.free(environment); core.free(pointers); core.free(arguments); }
@@ -168,11 +168,11 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
 
 fn finish_child(pid: i32, terminate: bool) bool {
     @cfg(target_os = "linux") {
-        if (terminate) { unsafe { unix.kill(pid, 9); } }
+        if (terminate) { unsafe { linux.kill(pid, 9); } }
         var status: u32 = 0;
         var observed: i32 = -1;
         for (true) {
-            unsafe { observed = unix.wait4(pid, &status, 0, 0); }
+            unsafe { observed = linux.wait4(pid, &status, 0, 0); }
             if (observed != -4) { break; }
         }
         ret observed == pid && (status & 127) == 0 && ((status >> 8) & 255) == 0;
@@ -190,7 +190,7 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
         unsafe { fds = core.malloc(8); }
         if (fds == 0) { ret String.new(); }
         var opened: i32 = -1;
-        unsafe { opened = unix.pipe2(fds, 524288); }
+        unsafe { opened = linux.pipe2(fds, 524288); }
         if (opened < 0) {
             unsafe { core.free(fds); }
             ret String.new();
@@ -234,12 +234,12 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
             const remaining = timeout_ms - (now - started);
             const delay: i32 = if (remaining < 100) { remaining as i32 } else { 100 };
             var polled: i32 = -1;
-            unsafe { polled = unix.poll(ready, 1, delay); }
+            unsafe { polled = linux.poll(ready, 1, delay); }
             if (polled == -4) { continue; }
             if (polled < 0) { bad = true; break; }
             if (polled == 0) { continue; }
             var n: isize = -1;
-            unsafe { n = unix.read(input, buffer + used, max_output - used); }
+            unsafe { n = linux.read(input, buffer + used, max_output - used); }
             if (n == -4) { continue; }
             if (n < 0) { bad = true; break; }
             if (n == 0) { finished = true; break; }
@@ -258,7 +258,7 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
         for (!complete) {
             var status: u32 = 0;
             var observed: i32 = -1;
-            unsafe { observed = unix.wait4(pid, &status, 1, 0); }
+            unsafe { observed = linux.wait4(pid, &status, 1, 0); }
             if (observed == pid) {
                 success = (status & 127) == 0 && ((status >> 8) & 255) == 0;
                 complete = true;
@@ -292,21 +292,21 @@ pub fn parse_version(output: str) String {
     const length: usize = output.bytes_len();
     var i: usize = 0;
     for (i + 2 < length) {
-        const a: u8 = core.str_byte_at(output, i);
+        const a: u8 = text.byte_at(output, i);
         if (a < 48 || a > 57) { i++; continue; }
         // Do not match a version embedded in an identifier.
         if (i > 0) {
-            const prev: u8 = core.str_byte_at(output, i - 1);
+            const prev: u8 = text.byte_at(output, i - 1);
             if ((prev >= 48 && prev <= 57) || (prev >= 65 && prev <= 90) ||
                 (prev >= 97 && prev <= 122)) { i++; continue; }
         }
         var j: usize = i;
         var saw_dot: bool = false;
         for (j < length) {
-            const c: u8 = core.str_byte_at(output, j);
+            const c: u8 = text.byte_at(output, j);
             if (c >= 48 && c <= 57) { j++; continue; }
             if (c == 46 && j > i && j + 1 < length) {
-                const next: u8 = core.str_byte_at(output, j + 1);
+                const next: u8 = text.byte_at(output, j + 1);
                 if (next >= 48 && next <= 57) { saw_dot = true; j++; continue; }
             }
             break;

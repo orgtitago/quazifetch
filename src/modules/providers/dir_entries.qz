@@ -3,21 +3,21 @@
 
 // std.fs can count directory entries, but it cannot list their names.
 import std.core;
-import std.unix;
+import std.linux;
 
 pub fn names(path: String) Array[String] {
     var entries: Array[String] = Array.new();
     @cfg(target_os = "linux") {
         var fd: i32 = -1;
-        unsafe { fd = unix.open(path.as_str(), 65536, 0); } // O_DIRECTORY | O_RDONLY
+        unsafe { fd = linux.open(path.as_str(), 65536, 0); } // O_DIRECTORY | O_RDONLY
         if (fd < 0) { ret entries; }
         const capacity: usize = 4096;
         var buffer: *u8 = 0;
         unsafe { buffer = core.malloc(capacity); }
-        if (buffer == 0) { unsafe { unix.close(fd); } ret entries; }
+        if (buffer == 0) { unsafe { linux.close(fd); } ret entries; }
         for (true) {
             var amount: isize = -1;
-            unsafe { amount = unix.getdents64(fd, buffer, capacity); }
+            unsafe { amount = linux.getdents64(fd, buffer, capacity); }
             if (amount <= 0) { break; }
             var offset: usize = 0;
             for (offset < amount as usize) {
@@ -45,7 +45,7 @@ pub fn names(path: String) Array[String] {
             }
         }
         unsafe { core.free(buffer); }
-        unsafe { unix.close(fd); }
+        unsafe { linux.close(fd); }
     }
     entries
 }

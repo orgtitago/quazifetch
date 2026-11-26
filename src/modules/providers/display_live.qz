@@ -18,7 +18,7 @@ pub struct Active {
 
 pub fn missing() Active { Active { width: 0, height: 0, hz: 0, scale: String.new() } }
 
-fn at(src: str, pos: usize) u8 { core.str_byte_at(src, pos) }
+fn at(src: str, pos: usize) u8 { text.byte_at(src, pos) }
 fn whitespace(c: u8) bool { c == 32 || c == 9 || c == 10 || c == 13 }
 
 // Read only fields from the selected monitor object.

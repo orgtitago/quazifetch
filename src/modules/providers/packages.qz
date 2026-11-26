@@ -62,7 +62,7 @@ fn manifest(path: str) usize {
 }
 
 // Scan by bytes: slicing Quazi strings by rune would rescan the input.
-fn std_byte(data: str, at: usize) u8 { core.str_byte_at(data, at) }
+fn std_byte(data: str, at: usize) u8 { text.byte_at(data, at) }
 
 fn range_matches(data: str, from: usize, until: usize, pattern: str) bool {
     const n: usize = pattern.bytes_len();
