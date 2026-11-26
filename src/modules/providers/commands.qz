@@ -66,7 +66,7 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
                input: i32, output: i32) i32 {
     @cfg(target_os = "linux") {
         const capacity: usize = 262144;
-        var environment: *u8 = 0;
+        var environment: *u8! = 0;
         unsafe { environment = core.malloc(capacity + 1); }
         if (environment == 0) { ret -1; }
         var envfd: i32 = -1;
@@ -116,7 +116,7 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
         var offset: usize = 0;
         for (offset < length) {
             unsafe {
-                *((pointers + entries * 8) as **u8) = environment + offset;
+                *((pointers + entries * 8) as **u8!) = environment + offset;
             }
             entries++;
             for (offset < length) {
@@ -127,23 +127,23 @@ fn spawn_piped(path: str, arg1: str, arg2: str, arg3: str,
             }
         }
         unsafe {
-            *((pointers + entries * 8) as **u8) = 0;
-            *((arguments + 0) as **u8) = core.str_as_ptr(path);
+            *((pointers + entries * 8) as **u8!) = 0;
+            *((arguments + 0) as **u8!) = core.str_as_ptr(path);
         }
         var n: usize = 1;
         if (arg1 != "") {
-            unsafe { *((arguments + n * 8) as **u8) = core.str_as_ptr(arg1); }
+            unsafe { *((arguments + n * 8) as **u8!) = core.str_as_ptr(arg1); }
             n++;
         }
         if (arg2 != "") {
-            unsafe { *((arguments + n * 8) as **u8) = core.str_as_ptr(arg2); }
+            unsafe { *((arguments + n * 8) as **u8!) = core.str_as_ptr(arg2); }
             n++;
         }
         if (arg3 != "") {
-            unsafe { *((arguments + n * 8) as **u8) = core.str_as_ptr(arg3); }
+            unsafe { *((arguments + n * 8) as **u8!) = core.str_as_ptr(arg3); }
             n++;
         }
-        unsafe { *((arguments + n * 8) as **u8) = 0; }
+        unsafe { *((arguments + n * 8) as **u8!) = 0; }
         var pid: i32 = -1;
         unsafe { pid = linux.fork(); }
         if (pid == 0) {
@@ -208,7 +208,7 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
         close_fd(output);
         if (pid <= 0) { close_fd(input); ret String.new(); }
         const max_output: usize = 2097152;
-        var buffer: *u8 = 0;
+        var buffer: *u8! = 0;
         var ready: *u8 = 0;
         unsafe {
             buffer = core.malloc(max_output + 1);
@@ -222,8 +222,8 @@ pub fn capture_timeout(program: str, arg1: str, arg2: str, arg3: str, timeout_ms
             ret String.new();
         }
         unsafe {
-            *(ready as *i32) = input;
-            *((ready + 4) as *i32) = 1;
+            *(ready as *i32!) = input;
+            *((ready + 4) as *i32!) = 1;
         }
         var used: usize = 0;
         var finished: bool = false;

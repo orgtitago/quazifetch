@@ -14,6 +14,16 @@ pub fn byte_at(value: str, index: usize) u8 {
     byte
 }
 
+// A byte of `value` at an index the caller has already bounded by the
+// string's length. A `str` is NUL-terminated, so the checked `byte_at`
+// measures the whole string on every call: scanning a file byte by byte
+// with it is quadratic (a 12 KiB /proc/cpuinfo took 70 ms).
+fn raw_byte(value: str, index: usize) u8 {
+    var byte: u8 = 0;
+    unsafe { byte = core.str_byte_at(value, index); }
+    byte
+}
+
 pub fn file(path: str) String {
     var result = fs.read_to_string_with_limit(path, 2097152);
     if (result.is_err()) { ret String.new(); }
@@ -25,8 +35,11 @@ pub fn file(path: str) String {
 fn rune_offset(input: str, byte_offset: usize) isize {
     var count: isize = 0;
     var i: usize = 0;
-    for (i < byte_offset) {
-        const b: u8 = byte_at(input, i);
+    var until: usize = byte_offset;
+    const length: usize = core.strlen(input);
+    if (until > length) { until = length; }
+    for (i < until) {
+        const b: u8 = raw_byte(input, i);
         if ((b & 192) != 128) { count++; }
         i++;
     }
@@ -42,7 +55,7 @@ pub fn basename(path: str) String {
     var i: usize = 0;
     const length: usize = core.strlen(path);
     for (i < length) {
-        const c: u8 = byte_at(path, i);
+        const c: u8 = raw_byte(path, i);
         if (c == 47 || c == 92) { from = i + 1; }
         i++;
     }
@@ -56,12 +69,12 @@ pub fn field(data: str, prefix: str) String {
     var start: usize = 0;
     var i: usize = 0;
     for (i <= length) {
-        if (i == length || byte_at(data, i) == 10) {
+        if (i == length || raw_byte(data, i) == 10) {
             if (i - start >= wanted) {
                 var matches: bool = true;
                 var j: usize = 0;
                 for (j < wanted) {
-                    if (byte_at(data, start + j) != byte_at(prefix, j)) {
+                    if (raw_byte(data, start + j) != raw_byte(prefix, j)) {
                         matches = false;
                         break;
                     }
@@ -72,7 +85,7 @@ pub fn field(data: str, prefix: str) String {
                     const trimmed = raw.trim();
                     const value: str = trimmed.as_str();
                     const n: usize = core.strlen(value);
-                    if (n >= 2 && byte_at(value, 0) == 34 && byte_at(value, n - 1) == 34) {
+                    if (n >= 2 && raw_byte(value, 0) == 34 && raw_byte(value, n - 1) == 34) {
                         ret byte_slice(value, 1, n - 1);
                     }
                     ret String.from(value);
@@ -106,14 +119,14 @@ pub fn count_lines(data: str, prefix: str) usize {
         var matches: bool = true;
         var j: usize = 0;
         for (j < wanted) {
-            if (byte_at(data, start + j) != byte_at(prefix, j)) {
+            if (raw_byte(data, start + j) != raw_byte(prefix, j)) {
                 matches = false;
                 break;
             }
             j++;
         }
         if (matches) { count++; }
-        for (start < length && byte_at(data, start) != 10) { start++; }
+        for (start < length && raw_byte(data, start) != 10) { start++; }
         if (start == length) { break; }
         start++;
     }
@@ -194,7 +207,7 @@ pub fn count_occurrences(data: str, needle: str) usize {
         var matching: bool = true;
         var j: usize = 0;
         for (j < m) {
-            if (byte_at(data, i + j) != byte_at(needle, j)) {
+            if (raw_byte(data, i + j) != raw_byte(needle, j)) {
                 matching = false;
                 break;
             }
@@ -222,7 +235,7 @@ pub fn word(raw: str, wanted: usize) String {
     for (i <= length) {
         var space: bool = i == length;
         if (i < length) {
-            const c = byte_at(raw, i);
+            const c = raw_byte(raw, i);
             space = c == 32 || c == 9 || c == 10 || c == 13;
         }
         if (space) {
@@ -249,7 +262,7 @@ pub fn contains_range(raw: str, start: usize, end: usize, needle: str) bool {
         var matches = true;
         var j: usize = 0;
         for (j < wanted) {
-            if (byte_at(raw, i + j) != byte_at(needle, j)) {
+            if (raw_byte(raw, i + j) != raw_byte(needle, j)) {
                 matches = false;
                 break;
             }

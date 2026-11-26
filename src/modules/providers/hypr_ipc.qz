@@ -40,7 +40,7 @@ pub fn request(message: str) String {
         var fd: i32 = -1;
         unsafe { fd = linux.socket(1, 1 | 2048 | 524288, 0); } // SOCK_STREAM | NONBLOCK | CLOEXEC
         if (fd < 0) { ret String.new(); }
-        var addr: *u8 = 0;
+        var addr: *u8! = 0;
         unsafe { addr = core.malloc(110); }
         if (addr == 0) { unsafe { linux.close(fd); } ret String.new(); }
         unsafe {
@@ -60,17 +60,17 @@ pub fn request(message: str) String {
         var pollfd: *u8 = 0;
         unsafe { pollfd = core.malloc(8); }
         if (pollfd == 0) { unsafe { linux.close(fd); } ret String.new(); }
-        unsafe { *(pollfd as *i32) = fd; }
+        unsafe { *(pollfd as *i32!) = fd; }
         if (connected != 0) {
-            unsafe { *((pollfd + 4) as *i16) = 4; *((pollfd + 6) as *i16) = 0; }
+            unsafe { *((pollfd + 4) as *i16!) = 4; *((pollfd + 6) as *i16!) = 0; }
             var ready: i32 = -1;
             unsafe { ready = linux.poll(pollfd, 1, 100); }
             if (ready <= 0) { unsafe { core.free(pollfd); } unsafe { linux.close(fd); } ret String.new(); }
             var soerror: *u8 = 0;
-            var length: *u32 = 0;
+            var length: *u32! = 0;
             unsafe {
                 soerror = core.malloc(4);
-                length = core.malloc(4) as *u32;
+                length = core.malloc(4) as *u32!;
             }
             if (soerror == 0 || length == 0) {
                 if (soerror != 0) { unsafe { core.free(soerror); } }
@@ -91,7 +91,7 @@ pub fn request(message: str) String {
         }
         var sent: usize = 0;
         for (sent < message.bytes_len()) {
-            unsafe { *((pollfd + 4) as *i16) = 4; *((pollfd + 6) as *i16) = 0; }
+            unsafe { *((pollfd + 4) as *i16!) = 4; *((pollfd + 6) as *i16!) = 0; }
             var ready: i32 = -1;
             unsafe { ready = linux.poll(pollfd, 1, 100); }
             if (ready <= 0) { unsafe { core.free(pollfd); } unsafe { linux.close(fd); } ret String.new(); }
@@ -101,13 +101,13 @@ pub fn request(message: str) String {
             sent += n as usize;
         }
         const capacity: usize = 524288;
-        var buffer: *u8 = 0;
+        var buffer: *u8! = 0;
         unsafe { buffer = core.malloc(capacity + 1); }
         if (buffer == 0) { unsafe { core.free(pollfd); } unsafe { linux.close(fd); } ret String.new(); }
         var used: usize = 0;
         var eof: bool = false;
         for (used < capacity) {
-            unsafe { *((pollfd + 4) as *i16) = 1; *((pollfd + 6) as *i16) = 0; }
+            unsafe { *((pollfd + 4) as *i16!) = 1; *((pollfd + 6) as *i16!) = 0; }
             var ready: i32 = -1;
             unsafe { ready = linux.poll(pollfd, 1, 100); }
             if (ready <= 0) { break; }

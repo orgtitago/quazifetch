@@ -62,7 +62,15 @@ fn manifest(path: str) usize {
 }
 
 // Scan by bytes: slicing Quazi strings by rune would rescan the input.
-fn std_byte(data: str, at: usize) u8 { text.byte_at(data, at) }
+// Callers keep `at` inside a range they already bounded (`from..until` of
+// `data`, or `0..n` of a pattern). A `str` is NUL-terminated, so the checked
+// `text.byte_at` measures the whole string on every call: over nix-store's
+// output (thousands of lines) that made the first run take ~20 s.
+fn std_byte(data: str, at: usize) u8 {
+    var byte: u8 = 0;
+    unsafe { byte = core.str_byte_at(data, at); }
+    byte
+}
 
 fn range_matches(data: str, from: usize, until: usize, pattern: str) bool {
     const n: usize = pattern.bytes_len();
